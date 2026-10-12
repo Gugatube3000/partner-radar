@@ -1,64 +1,88 @@
 # Partner Radar
 
-Pick a country. A small crew of AI agents finds the local asset managers, scores how good a partner each one is, finds the right person to talk to and their email, and hands you an Excel sheet sorted by best fit.
+Research financial partners worldwide using **your Codex / ChatGPT subscription or your Claude subscription**. Choose the provider in the dashboard; your choice is remembered. Research consumes that plan's normal limits. Optional contact-data services use their own keys and credits.
 
-It runs on **your own Claude plan** through Claude Code. No API keys, nothing to pay per run.
+![Partner Radar dashboard](screenshot.png)
 
-![Partner Radar](screenshot.png)
+## What changed in version 2
 
-## The crew
+- **250 destinations:** all 249 ISO countries and territories, plus Kosovo, with emoji flags, region groups and country search.
+- **More coverage:** up to 100 firms, several discovery passes through regulators, associations and local-language sources, with duplicate firms removed.
+- **Multiple people:** request 1–8 contacts per firm, select decision-maker roles, and inspect every person's email, role and evidence in the details drawer.
+- **Research controls:** balanced or deep research, institution types, minimum fit and exclusions. Smaller runs are a useful first check; results depend on public information and your provider limits.
+- **Visible integrations:** connect, test or disconnect Hunter, Apollo and Firecrawl without editing a file. Keys remain on your computer in the ignored `.env` file.
+- **Useful outputs:** an Excel firm overview and separate Contacts sheet, plus a CSV with one row per person. Both retain email status and source evidence.
+- **Reliable progress:** subscription sign-in checks, streaming activity, cancellation, clear partial/failed outcomes and saved results after refresh or server restart.
 
-| Agent | Job |
-|---|---|
-| **ATLAS** · scout | Maps the market's asset managers, starting from the securities regulator's register and industry-association lists |
-| **SAGE** · analyst | Reads each firm: assets under management, what they invest in, who they serve, leadership |
-| **JEV** · judge | Scores partner fit 1–5 with a confidence and a one-line reason |
-| **HOUND** · finder | Finds the CEO (or head of partnerships / distribution) and their email |
+## Start
 
-You see what they're doing live: every search and page read shows up on screen.
+Install [Node.js LTS](https://nodejs.org/) (20 or newer) and either CLI:
 
-### How firms are scored
+| Provider | Install and sign in |
+| --- | --- |
+| Codex | `npm install -g @openai/codex`, then `codex login` and choose ChatGPT sign-in. [Official setup](https://developers.openai.com/codex/cli/) |
+| Claude | Install [Claude Code](https://code.claude.com/docs/en/setup), then run `claude` and sign in with your eligible Claude subscription. |
 
-- **Good fit:** asset managers that invest in public markets (equities and/or fixed income). Adding a global equity strategy is a natural next step for them. Already offering some global equity is fine.
-- **Not a fit:** firms that only do real estate, private equity, infrastructure or private credit.
-- **Size** is judged relative to the country (around US$100M is usually too small).
+An installed CLI is not automatically a signed-in subscription. Partner Radar checks the login method and asks you to fix setup when needed. It does not use API credentials for subscription research. Codex uses the installed CLI's default model unless `CODEX_MODEL` is set; Claude offers Sonnet and Opus.
 
-### How emails are labeled
+On Windows, double-click **Start Partner Radar.bat**. On macOS, open **Start Partner Radar.command**. From a terminal:
 
-| Label | Meaning |
-|---|---|
-| **Published** | Seen on a public page |
-| **Inferred** | Built from the firm's email pattern; the example it used is shown |
-| **Guess** | Common format, no example found. Double-check before sending |
-| **Verified** | Checked by Hunter (optional free key) |
-| **No mail server** | The domain doesn't accept email, so don't use it |
+```sh
+npm ci
+npm start
+```
 
-## Run it
+Open [localhost:4747](http://localhost:4747), choose **Codex** or **Claude**, select a country and launch. The explicitly labeled demo uses fictional `.example` data and does not make AI calls. Keep the terminal open while the app runs.
 
-You need:
+## Hunter, Apollo and Firecrawl
 
-1. **Claude Code**, installed and signed in with a Claude Pro or Max plan: https://claude.com/claude-code
-2. **Node.js** (free, LTS): https://nodejs.org
+Expand **Connections** in the dashboard. Use **Get key**, paste the key into its masked field, click **Connect**, then **Test**. A saved key is labeled configured; a successful connection test is labeled ready. Connection tests do not prove every enrichment endpoint is included in your account.
 
-Then:
+| Service | Automatic dashboard use | Setup |
+| --- | --- | --- |
+| Hunter | Discover named business contacts, find emails for known people and check deliverability. The activity log and each contact show Hunter when used. | [API key](https://hunter.io/api-keys), [API documentation](https://hunter.io/api-documentation/v2) |
+| Apollo | Enrich known decision-makers with company work emails, matching name and company. It does not request personal emails or phone numbers. A Hunter check can then verify the result. | [API key](https://developer.apollo.io/#/keys), [API access and credits](https://docs.apollo.io/reference/people-enrichment) |
+| Firecrawl | Read official company pages for public contact evidence when available. | [API key](https://www.firecrawl.dev/app/api-keys), [documentation](https://docs.firecrawl.dev/) |
 
-- **Windows:** double-click `Start Partner Radar.bat`
-- **Mac:** right-click `Start Partner Radar.command` → Open (the first time only)
-- **Or from a terminal:** `npm install` then `npm start`
+Alternatively copy `.env.example` to `.env` and fill the selected keys. Never commit `.env` or run logs. Failed or rate-limited enrichment retains public research and reports a warning. Contact lookups and verification may consume vendor credits; quotas vary by account.
 
-Your browser opens http://localhost:4747. Pick a country, choose how many firms (start with 5–10), click **LAUNCH**. About 4–5 minutes for 8 firms on Sonnet. Click any row for the details, then **Download Excel**.
+### Easy MCP setup
 
-Big runs use more of your Claude plan's limits, so start small.
+The Connections panel offers **Add MCP** for the documented remote [Hunter](https://hunter.io/mcp) and [Apollo](https://docs.apollo.io/docs/apollo-mcp) servers in your chosen CLI. It registers the service and shows the sign-in step. Authentication still requires completing the provider's account flow. Existing servers with conflicting names are preserved.
 
-## Optional extras
+These MCP registrations are available to your CLI sessions. **Partner Radar's automatic contact enrichment uses the API keys above.** An MCP login and an API key connection are separate; MCP registration alone does not activate dashboard enrichment.
 
-Copy `.env.example` to `.env`:
+| Service | Official remote endpoint |
+| --- | --- |
+| Hunter | `https://mcp.hunter.io/mcp` |
+| Apollo | `https://mcp.apollo.io/mcp` |
 
-- `HUNTER_API_KEY` verifies emails before you send (free tier at hunter.io).
-- `FIRECRAWL_API_KEY` reads company websites more cleanly (free tier at firecrawl.dev).
+For Codex, registration can also be done with `codex mcp add apollo --url https://mcp.apollo.io/mcp`, followed by `codex mcp login apollo`. For Claude Code, use `claude mcp add --scope user --transport http apollo https://mcp.apollo.io/mcp`, then open Claude and use `/mcp` to authenticate. Hunter and Firecrawl setup links are included in the dashboard; follow their official instructions for supported authentication.
 
-## Notes
+## Evidence and email status
 
-- Everything runs locally. It only reads public web pages.
-- It doesn't send anything. You review the sheet and reach out yourself.
-- Each run is saved in `runs/` so you can replay it with **Replay last live run**.
+**Found using** and **Verified using** are separate fields. A database match or a domain with mail servers is not proof that a mailbox accepts messages.
+
+| Status | Meaning |
+| --- | --- |
+| Published | A public source identifies the address. Source links are retained. |
+| Inferred | Based on an evidenced company email pattern or provider finder; it is not a published address. |
+| Guess | A possible format without supporting pattern evidence; requires review. |
+| Verified | Hunter returned a valid/deliverable result. |
+| Catch-all | The domain accepts arbitrary recipients; the individual mailbox remains uncertain. |
+| Unverified | Deliverability could not be confirmed. |
+| Invalid / No mail server | Excluded from usable-email totals. |
+
+The app prioritizes asset managers investing in public markets. Selecting banks, wealth managers, brokers, insurers, platforms or family offices adjusts discovery and fit scoring. It does not invent firms or people to fill a requested target; small markets and incomplete public sources can yield fewer results. Review roles, sources and addresses before outreach. The app drafts text when requested and never sends outreach.
+
+Runs are stored locally in `runs/`. Live results reopen after a page refresh; stopped or interrupted runs retain their partial data. Exported contacts remain available after restarting the server.
+
+## Development
+
+```sh
+npm ci
+npm run check
+npm test
+```
+
+Regression tests use fake CLIs and mocked network responses for subscription authentication, output parsing, cancellation, scouting, contact evidence, integration keys, email verification, countries, exports and saved-run recovery.

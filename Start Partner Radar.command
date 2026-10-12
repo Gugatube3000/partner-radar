@@ -8,10 +8,14 @@ if ! command -v node >/dev/null 2>&1; then
   read -r -p "Press Enter to close"
   exit 1
 fi
-if ! command -v claude >/dev/null 2>&1; then
-  echo "Claude Code was not found. LIVE runs need it - see README.txt. DEMO mode still works."
+if ! command -v claude >/dev/null 2>&1 && ! command -v codex >/dev/null 2>&1; then
+  echo "Install Codex or Claude Code and sign in for live research. The dashboard has setup help and a demo."
 fi
-[ -d node_modules/express ] || { echo "First run: installing, one moment..."; npm install --omit=dev; }
+if [ ! -d node_modules/express ] || ! cmp -s package-lock.json node_modules/.partner-radar-lock; then
+  echo "Installing current dependencies, one moment..."
+  npm ci --omit=dev || exit 1
+  cp package-lock.json node_modules/.partner-radar-lock
+fi
 echo ""
 echo "Partner Radar is running at http://localhost:4747"
 echo "Keep this window open. Close it to stop."

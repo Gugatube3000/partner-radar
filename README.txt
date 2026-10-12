@@ -1,49 +1,46 @@
-PARTNER RADAR
-=============
-Pick a country. A small crew of AI agents finds the local banks, wealth managers
-and brokerages, scores how good a partner each one is, finds the right person to
-talk to, and hands you an Excel sheet sorted by best fit.
+PARTNER RADAR 2
+===============
+Choose your Codex / ChatGPT subscription or your Claude subscription in the dashboard.
+Research uses your normal subscription allowance. Optional data-service credits are separate.
 
-It runs on YOUR Claude plan. No API keys, nothing to pay per run.
+START
+-----
+Install Node.js LTS (20+): https://nodejs.org
+Install and sign in to ONE provider:
+  Codex: npm install -g @openai/codex, then codex login (ChatGPT sign-in).
+  Claude Code: https://code.claude.com/docs/en/setup, then run claude and sign in.
+Windows: double-click Start Partner Radar.bat
+Mac: open Start Partner Radar.command
+Terminal: npm ci, then npm start
+Open http://localhost:4747 and keep the terminal open.
 
+USE
+---
+Select a provider, country with flag, institution types and roles.
+Choose 3-100 firms and 1-8 contacts per firm; start small.
+Balanced/deep controls research coverage. Inspect contact evidence before outreach.
+Excel includes a separate Contacts sheet. CSV exports each person.
+Demo data is fictional. Saved partial/live results reopen after restart.
 
-WHAT YOU NEED (one time)
-------------------------
-1. Node.js (free): https://nodejs.org  ->  download the "LTS" version and install it.
-2. Claude Code, signed in with your Claude account (Pro or Max plan):
-   https://claude.com/claude-code  ->  install it, open it once and sign in.
+CONNECTIONS
+-----------
+Expand Connections. Get key -> paste into masked field -> Connect -> Test.
+Hunter: email discovery/finder/verification; https://hunter.io/api-keys
+Apollo: known-person work email enrichment; https://developer.apollo.io/#/keys
+Firecrawl: official website reading; https://www.firecrawl.dev/app/api-keys
+These vendors have separate credits and account access requirements.
+Keys are stored locally in .env and never shown in the browser or committed.
 
+MCP
+---
+Add MCP registers official Hunter/Apollo remote servers in Codex or Claude Code.
+Complete account sign-in using the shown CLI command. Registration and login are separate.
+Dashboard enrichment uses API keys; a CLI MCP login alone does not activate it.
 
-START IT
---------
-Windows:  double-click  "Start Partner Radar.bat"
-Mac:      right-click   "Start Partner Radar.command"  ->  Open
-          (the first time only, macOS asks you to confirm because it was downloaded)
-
-Your browser opens Partner Radar. Keep the small black window open while you use it.
-Close that window to stop.
-
-
-USE IT
-------
-1. Pick the country and how many firms. It looks for asset managers that invest
-   in equities or fixed income, and skips real estate / private-equity-only firms.
-2. Click LAUNCH. About 4-5 minutes for 8 firms on Sonnet. Opus is deeper but slower.
-3. Click any row on the lead board for the details. Click "DOWNLOAD EXCEL" when it's done.
-
-Start small: one country, 5-10 firms. Big runs use more of your Claude plan's limits.
-
-
-EMAILS
-------
-Every email is labeled:
-  PUBLISHED  seen on a public page
-  INFERRED   built from the firm's email pattern (the example it used is shown)
-  GUESS      common format, no example found - double-check before sending
-  VERIFIED   checked by Hunter (only if you add a free Hunter key, below)
-
-
-VERIFIED EMAILS (optional)
---------------------------
-To check emails before sending, get a free Hunter key (hunter.io > API) and put it in a file
-called ".env" in this folder (copy ".env.example" and fill in the HUNTER_API_KEY line).
+EMAIL STATUS
+------------
+Published: public evidence. Inferred: evidenced format/provider suggestion.
+Guess: unconfirmed format. Verified: Hunter valid/deliverable result.
+Catch-all: individual mailbox uncertain. Invalid/no mail server: excluded from totals.
+An email found by Apollo or an MX DNS record is not automatically Verified.
+The app never sends outreach. See README.md for detailed setup and source documentation.

@@ -1,155 +1,117 @@
 // @ts-check
-// Partner Radar - local server. Serves the dashboard, runs the agent pipeline,
-// streams progress over Server-Sent Events and hands back the Excel sheet.
+import "./lib/env.js";
 import express from "express";
-import { readFileSync, existsSync } from "node:fs";
-import { dirname as _dirname, join as _join } from "node:path";
-import { fileURLToPath as _f2p } from "node:url";
-
-// Load optional .env (Hunter key etc.) without needing a recent Node flag.
-{
-  const envFile = _join(_dirname(_f2p(import.meta.url)), ".env");
-  if (existsSync(envFile)) {
-    for (const line of readFileSync(envFile, "utf8").split(/\r?\n/)) {
-      const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*([^#]*?)\s*(#.*)?$/);
-      if (m && m[2] && !process.env[m[1]]) process.env[m[1]] = m[2];
-    }
-  }
-}
-import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { COUNTRIES, getCountry } from "./lib/countries.js";
-import { Run, RUNS_DIR, listSavedRuns } from "./lib/run.js";
+import { Run, listSavedRuns, loadSavedRun } from "./lib/run.js";
 import { runPipeline } from "./lib/pipeline.js";
-import { buildWorkbook } from "./lib/excel.js";
-import { detectEngines, ENGINE_LABELS, MODELS } from "./lib/llm.js";
+import { buildWorkbook, buildCsv } from "./lib/excel.js";
+import { getEngineStatuses, MODELS } from "./lib/llm.js";
+import { integrationStatus, saveIntegration, testIntegration } from "./lib/integrations.js";
+import { getMcpStatus, setupMcp } from "./lib/mcp.js";
 
-const PORT = Number(process.env.PORT) || 4747;
-const HOST = process.env.HOST || "127.0.0.1";
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
-const app = express();
-app.use(express.json({ limit: "200kb" }));
-app.use(express.static(path.join(ROOT, "public")));
-app.use("/vendor/three", express.static(path.join(ROOT, "node_modules/three")));
-
-/** @type {Map<string, Run>} */
-const runs = new Map();
-
-let budgetCache = { at: 0, value: /** @type {any} */ (null) };
-async function openRouterBudget() {
-  if (!process.env.OPENROUTER_API_KEY) return null;
-  if (Date.now() - budgetCache.at < 30000) return budgetCache.value;
-  try {
-    const r = await fetch("https://openrouter.ai/api/v1/key", { headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}` } });
-    const d = (await r.json()).data;
-    budgetCache = { at: Date.now(), value: { limit: d.limit, remaining: d.limit_remaining, usage: d.usage } };
-  } catch { /* offline */ }
-  return budgetCache.value;
-}
-
-app.get("/api/status", async (_req, res) => {
-  const engines = detectEngines();
-  res.json({
-    engines: Object.entries(engines).map(([id, ok]) => ({ id, ok, label: ENGINE_LABELS[id], model: MODELS[id].brain, judge: MODELS[id].judge })),
-    extras: { firecrawl: !!process.env.FIRECRAWL_API_KEY, hunter: !!process.env.HUNTER_API_KEY, jev: !!process.env.TYPESAFE_API_KEY || engines.openrouter },
-    budget: await openRouterBudget(),
-    countries: COUNTRIES,
-    replays: listSavedRuns().slice(0, 8),
-  });
-});
-
-const ROLES = ["CEO", "Head of Wealth", "Head of Partnerships", "CIO", "Head of Distribution"];
-const TYPES = ["Private banks", "Wealth managers", "Brokerages", "Asset managers", "Digital investment platforms", "Insurers"];
-
-app.post("/api/runs", (req, res) => {
-  const b = req.body ?? {};
-  const engines = detectEngines();
-  const mode = b.mode === "live" ? "live" : "demo";
-  const engine = mode === "live" ? String(b.engine || "") : "demo";
-  if (mode === "live" && !engines[engine]) return res.status(400).json({ error: `Engine ${engine} is not available on this machine` });
-  const config = {
-    types: (Array.isArray(b.types) ? b.types : []).filter((t) => TYPES.includes(t)).slice(0, 6),
-    segments: (Array.isArray(b.segments) ? b.segments : ["Retail", "Affluent"]).map(String).slice(0, 4),
-    roles: (Array.isArray(b.roles) ? b.roles : ["CEO"]).filter((r) => ROLES.includes(r)),
-    minAum: String(b.minAum || "Any"),
-    firms: Math.max(3, Math.min(40, Number(b.firms) || 15)),
-    minFit: Math.max(1, Math.min(5, Number(b.minFit) || 3)),
-    exclude: String(b.exclude || "").slice(0, 2000),
-    template: String(b.template || "").slice(0, 4000),
-    sender: String(b.sender || "").slice(0, 120),
-    localLanguage: b.localLanguage !== false,
-    personalize: b.personalize !== false,
-    spendCap: Math.max(0.5, Math.min(20, Number(b.spendCap) || 3)),
-    speed: Math.max(0.5, Math.min(8, Number(b.speed) || 1)),
-    drafts: b.drafts === true,
-    claudeModel: b.claudeModel === "opus" ? "opus" : "sonnet",
+export const ROLES = ["CEO", "Head of Wealth", "Head of Partnerships", "CIO", "Head of Distribution", "Head of Investments", "Business Development"];
+export const TYPES = ["Private banks", "Wealth managers", "Brokerages", "Asset managers", "Digital investment platforms", "Insurers", "Family offices"];
+const bounded = (value, fallback, min, max) => Number.isFinite(Number(value)) ? Math.max(min, Math.min(max, Number(value))) : fallback;
+export function normalizeConfig(body) {
+  const selected = (value, allowed, defaults) => Array.isArray(value) ? [...new Set(value.filter((item) => allowed.includes(item)))] : defaults;
+  const types = selected(body.types, TYPES, ["Asset managers"]), roles = selected(body.roles, ROLES, ["CEO", "Head of Partnerships", "Head of Distribution"]);
+  return {
+    types: types.length ? types : ["Asset managers"], roles: roles.length ? roles : ["CEO", "CIO", "Head of Distribution"],
+    segments: selected(body.segments, ["Retail", "Affluent", "HNW", "Institutional"], []), minAum: String(body.minAum || "auto").slice(0, 80),
+    firms: Math.round(bounded(body.firms ?? 15, 15, 3, 100)), contactsPerFirm: Math.round(bounded(body.contactsPerFirm ?? 3, 3, 1, 8)),
+    researchDepth: body.researchDepth === "deep" ? "deep" : "balanced", minFit: Math.round(bounded(body.minFit ?? 3, 3, 1, 5)),
+    exclude: String(body.exclude || "").slice(0, 2000), template: String(body.template || "").slice(0, 4000), sender: String(body.sender || "").slice(0, 120),
+    localLanguage: body.localLanguage !== false, personalize: body.personalize !== false, spendCap: bounded(body.spendCap ?? 3, 3, 0.5, 20),
+    speed: bounded(body.speed ?? 1, 1, 0.5, 20), drafts: body.drafts === true, claudeModel: body.claudeModel === "opus" ? "opus" : "sonnet",
+    useIntegrations: body.useIntegrations !== false,
+    integrations: Object.fromEntries(integrationStatus().integrations.map((item) => [item.id, item.connected && body.useIntegrations !== false])),
   };
-  config.types = ["Asset managers"];
-  if (!config.roles.length) config.roles = ["CEO", "Head of Partnerships", "Head of Distribution"];
-  const country = getCountry(String(b.country || "BR"));
-  const run = new Run({ mode, engine, config, country });
-  runs.set(run.id, run);
-  run.emit("run", { id: run.id, mode, engine, config, country, model: mode === "live" ? MODELS[engine]?.brain : "demo", judge: mode === "live" ? MODELS[engine]?.judge : "demo" });
-  runPipeline(run).catch((e) => run.emit("error", { message: String(e?.message || e) }));
-  res.json({ id: run.id });
-});
-
-app.post("/api/replay/:id", (req, res) => {
-  const file = path.join(RUNS_DIR, `${path.basename(req.params.id)}.jsonl`);
-  if (!fs.existsSync(file)) return res.status(404).json({ error: "Run not found" });
-  const events = fs.readFileSync(file, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  const first = events[0];
-  const speed = Math.max(1, Math.min(20, Number(req.query.speed) || 4));
-  const run = new Run({ mode: "replay", engine: first.engine, config: first.config, country: first.country });
-  runs.set(run.id, run);
-  run.emit("run", { ...first, id: run.id, mode: "replay", replayOf: req.params.id, speed });
-  (async () => {
-    let last = 0;
-    for (const e of events.slice(1)) {
-      if (run.aborted) break;
-      const wait = Math.min(4000, (e.t - last) / speed);
-      last = e.t;
-      if (wait > 4) await new Promise((r) => setTimeout(r, wait));
-      const { t, type, ...data } = e;
-      if (type === "firm") run.firms.set(data.firm.id, { ...data.firm });
-      if (type === "firm_update") Object.assign(run.firms.get(data.id) ?? {}, data.patch);
-      if (type === "metrics") Object.assign(run.metrics, data);
-      run.emit(type, data);
+}
+export function createApp() {
+  const app = express();
+  /** @type {Map<string, Run>} */
+  const runs = new Map();
+  app.disable("x-powered-by");
+  app.use((req, res, next) => {
+    const origin = req.get("origin");
+    if (req.get("sec-fetch-site") === "cross-site" || (origin && origin !== `${req.protocol}://${req.get("host")}`)) return res.status(403).json({ error: "Use Partner Radar from its local dashboard" });
+    next();
+  });
+  app.use(express.json({ limit: "200kb" }));
+  app.use(express.static(path.join(ROOT, "public")));
+  app.use("/vendor/three", express.static(path.join(ROOT, "node_modules/three")));
+  function findRun(id) { if (runs.has(id)) return runs.get(id); const saved = loadSavedRun(id); if (saved) runs.set(id, saved); return saved; }
+  app.get("/api/status", async (req, res) => {
+    const statuses = await getEngineStatuses({ refresh: req.query.refresh === "1" });
+    res.json({ engines: Array.isArray(statuses) ? statuses : Object.entries(statuses).map(([id, item]) => ({ id, ...item })), extras: { hunter: !!process.env.HUNTER_API_KEY, apollo: !!process.env.APOLLO_API_KEY, firecrawl: !!process.env.FIRECRAWL_API_KEY }, countries: COUNTRIES, replays: listSavedRuns().slice(0, 12) });
+  });
+  app.get("/api/integrations", (_req, res) => res.json(integrationStatus()));
+  app.put("/api/integrations/:id", (req, res) => { try { res.json(saveIntegration(req.params.id, req.body?.apiKey)); } catch (error) { res.status(400).json({ error: error.message }); } });
+  app.delete("/api/integrations/:id", (req, res) => { try { res.json(saveIntegration(req.params.id, "")); } catch (error) { res.status(400).json({ error: error.message }); } });
+  app.post("/api/integrations/:id/test", async (req, res) => { try { res.json(await testIntegration(req.params.id)); } catch (error) { res.status(400).json({ error: error.message }); } });
+  app.get("/api/mcp", async (_req, res) => res.json(await getMcpStatus()));
+  app.post("/api/mcp/:provider/:id/setup", async (req, res) => { try { res.json(await setupMcp(req.params.provider, req.params.id)); } catch (error) { res.status(400).json({ error: error.message }); } });
+  app.post("/api/runs", async (req, res) => {
+    const body = req.body || {};
+    if (body.mode && !["live", "demo"].includes(body.mode)) return res.status(400).json({ error: "Choose live or demo mode" });
+    const mode = body.mode === "demo" ? "demo" : "live", engine = mode === "live" ? String(body.engine || "") : "demo";
+    const countryCode = String(body.country || "BR").toUpperCase();
+    if (!COUNTRIES.some((country) => country.code === countryCode)) return res.status(400).json({ error: "Select a valid country" });
+    if ([...runs.values()].filter((run) => !run.done).length >= 2) return res.status(409).json({ error: "Two runs are already active. Stop or finish one first." });
+    if (mode === "live") {
+      const statuses = await getEngineStatuses();
+      const status = Array.isArray(statuses) ? statuses.find((item) => item.id === engine) : statuses[engine];
+      if (!status?.ok) return res.status(400).json({ error: status?.message || "Select an installed and signed-in provider" });
     }
-    run.done = true;
-  })();
-  res.json({ id: run.id });
-});
-
-app.get("/api/runs/:id/events", (req, res) => {
-  const run = runs.get(req.params.id);
-  if (!run) return res.status(404).end();
-  res.set({ "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
-  res.flushHeaders();
-  const off = run.subscribe((e) => res.write(`data: ${JSON.stringify(e)}\n\n`));
-  const ping = setInterval(() => res.write(": ping\n\n"), 15000);
-  req.on("close", () => { off(); clearInterval(ping); });
-});
-
-app.post("/api/runs/:id/stop", (req, res) => {
-  runs.get(req.params.id)?.stop();
-  res.json({ ok: true });
-});
-
-app.get("/api/runs/:id/excel", async (req, res) => {
-  const run = runs.get(req.params.id);
-  if (!run) return res.status(404).end();
-  const wb = await buildWorkbook(run);
-  const name = `Partner-Radar_${run.country.name.replace(/\s+/g, "-")}_${new Date().toISOString().slice(0, 10)}${run.mode === "demo" ? "_DEMO" : ""}.xlsx`;
-  res.set({ "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Content-Disposition": `attachment; filename="${name}"` });
-  await wb.xlsx.write(res);
-  res.end();
-});
-
-app.listen(PORT, HOST, () => {
-  const e = detectEngines();
-  console.log(`\n  PARTNER RADAR  →  http://localhost:${PORT}\n`);
-  console.log(`  engines: ${Object.entries(e).map(([k, v]) => `${k} ${v ? "✓" : "·"}`).join("   ")}`);
-  console.log(`  extras:  hunter ${process.env.HUNTER_API_KEY ? "✓" : "·"}   firecrawl ${process.env.FIRECRAWL_API_KEY ? "✓" : "·"}   jev ${process.env.TYPESAFE_API_KEY || e.openrouter ? "✓" : "·"}\n`);
-});
+    const config = normalizeConfig(body), country = getCountry(countryCode), run = new Run({ mode, engine, config, country });
+    runs.set(run.id, run);
+    const model = mode === "demo" ? "demo" : engine === "claude-cli" ? config.claudeModel : MODELS[engine]?.brain || "Provider default";
+    run.emit("run", { id: run.id, mode, engine, config, country, model, judge: model });
+    runPipeline(run).catch((error) => { run.log("err", "pipeline", String(error?.message || error)); run.done = true; run.emit("done", { failed: !run.aborted, stopped: run.aborted, state: run.aborted ? "stopped" : "failed", outcome: run.aborted ? "stopped" : "failed", partial: !!run.firms.size, error: String(error?.message || error), firms: run.firms.size }); });
+    res.json({ id: run.id });
+  });
+  app.get("/api/runs/:id", (req, res) => { const run = findRun(req.params.id); if (!run) return res.status(404).json({ error: "Run not found" }); res.json(run.snapshot()); });
+  app.post("/api/replay/:id", (req, res) => {
+    const original = findRun(req.params.id);
+    if (!original) return res.status(404).json({ error: "Run not found" });
+    if (!original.done) return res.status(409).json({ error: "This run is still active" });
+    const events = [...original.events], speed = bounded(req.query.speed ?? 4, 4, 1, 20), run = new Run({ mode: "replay", engine: original.engine, config: original.config, country: original.country });
+    runs.set(run.id, run); run.emit("run", { ...events[0], id: run.id, mode: "replay", replayOf: original.id, speed });
+    (async () => {
+      let last = 0;
+      for (const event of events.slice(1)) {
+        if (run.aborted) break;
+        const wait = Math.max(0, Math.min(1000, (event.t - last) / speed)); last = event.t;
+        if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
+        const { t, seq, type, ...data } = event;
+        if (type === "firm") run.firms.set(data.firm.id, { ...data.firm });
+        if (type === "firm_update") Object.assign(run.firms.get(data.id) || {}, data.patch);
+        if (type === "metrics") Object.assign(run.metrics, data);
+        run.emit(type, data);
+      }
+      run.done = true; if (run.aborted) run.emit("done", { stopped: true, state: "stopped" });
+    })().catch((error) => { run.done = true; run.emit("done", { failed: true, error: error.message }); });
+    res.json({ id: run.id });
+  });
+  app.get("/api/runs/:id/events", (req, res) => {
+    const run = findRun(req.params.id); if (!run) return res.status(404).json({ error: "Run not found" });
+    const after = Number(req.get("last-event-id") || 0);
+    res.set({ "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive" }); res.flushHeaders();
+    const off = run.subscribe((event) => res.write(`id: ${event.seq}\ndata: ${JSON.stringify(event)}\n\n`), Number.isFinite(after) ? after : 0);
+    const ping = setInterval(() => res.write(": ping\n\n"), 15000); req.on("close", () => { off(); clearInterval(ping); });
+  });
+  app.post("/api/runs/:id/stop", (req, res) => { const run = runs.get(req.params.id); if (!run) return res.status(404).json({ error: "Run not found" }); run.stop(); res.json({ ok: true }); });
+  const exportName = (run, extension) => `Partner-Radar_${run.country.code}_${new Date().toISOString().slice(0, 10)}${run.mode === "demo" ? "_DEMO" : ""}.${extension}`;
+  app.get("/api/runs/:id/excel", async (req, res) => { const run = findRun(req.params.id); if (!run) return res.status(404).json({ error: "Run not found" }); res.set({ "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Content-Disposition": `attachment; filename="${exportName(run, "xlsx")}"` }); await (await buildWorkbook(run)).xlsx.write(res); res.end(); });
+  app.get("/api/runs/:id/csv", (req, res) => { const run = findRun(req.params.id); if (!run) return res.status(404).json({ error: "Run not found" }); res.set({ "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="${exportName(run, "csv")}"` }); res.send(buildCsv(run)); });
+  app.use((error, _req, res, _next) => res.status(error.status || 500).json({ error: error.status === 400 ? "Invalid JSON request" : "Request could not be completed" }));
+  return app;
+}
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const port = Number(process.env.PORT) || 4747, host = process.env.HOST || "127.0.0.1";
+  const server = createApp().listen(port, host, () => console.log(`\n  PARTNER RADAR → http://localhost:${port}\n  Choose Codex or Claude, then connect optional data sources in the dashboard.\n`));
+  server.on("error", (error) => { console.error(`Could not start Partner Radar: ${error.message}`); process.exitCode = 1; });
+}

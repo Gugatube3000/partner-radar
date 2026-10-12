@@ -12,14 +12,28 @@ if errorlevel 1 (
 )
 where claude >nul 2>nul
 if errorlevel 1 (
-  echo.
-  echo  Claude Code was not found. LIVE runs need it - see README.txt.
-  echo  DEMO mode still works.
-  echo.
+  where codex >nul 2>nul
+  if errorlevel 1 (
+    echo  Install Codex or Claude Code and sign in for live research.
+    echo  The dashboard includes setup help and a demo.
+  )
 )
-if not exist node_modules\express (
+set "RADAR_INSTALL=0"
+if not exist node_modules\express set "RADAR_INSTALL=1"
+if not exist node_modules\.partner-radar-lock set "RADAR_INSTALL=1"
+if exist node_modules\.partner-radar-lock (
+  fc /b package-lock.json node_modules\.partner-radar-lock >nul 2>nul
+  if errorlevel 1 set "RADAR_INSTALL=1"
+)
+if "%RADAR_INSTALL%"=="1" (
   echo  First run: installing, one moment...
-  call npm install --omit=dev
+  call npm ci --omit=dev
+  if errorlevel 1 (
+    echo  Installation failed. Check your internet connection and retry.
+    pause
+    exit /b 1
+  )
+  copy /y package-lock.json node_modules\.partner-radar-lock >nul
 )
 echo.
 echo  Partner Radar is running at http://localhost:4747

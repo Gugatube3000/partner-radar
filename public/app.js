@@ -1,18 +1,20 @@
 import { createBrain } from "/brain.js";
 import { AGENTS } from "/mascots.js";
+import { safeHttpUrl, contactsForFirm, hasUsableEmail, hasEmailEvidence, summarizeFirms, matchesFirm, selectedEngine } from "/ui-utils.js";
 
 const $ = (s) => document.querySelector(s);
 const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const params = new URLSearchParams(location.search);
+if (params.has("noboot")) $("#boot").classList.add("gone");
 let NOWRITER = true;
 function setWriter(on) { NOWRITER = !on; document.body.classList.toggle("nowriter", !on); }
 const store = { get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
 
 const STATIONS = [["brief", "BRIEF"], ["scout", "SCOUT"], ["analyst", "ANALYST"], ["judge", "JUDGE"], ["finder", "FINDER"], ["verify", "VERIFY"], ["writer", "WRITER"], ["excel", "EXCEL"]];
-const TYPES = ["Private banks", "Wealth managers", "Brokerages", "Asset managers", "Digital investment platforms", "Insurers"];
+const TYPES = ["Asset managers", "Wealth managers", "Private banks", "Brokerages", "Digital investment platforms", "Insurers", "Family offices"];
 const SEGMENTS = ["Retail", "Affluent", "HNW"];
-const ROLES = ["CEO", "Head of Wealth", "Head of Partnerships", "CIO", "Head of Distribution"];
+const ROLES = ["CEO", "CIO", "Head of Partnerships", "Head of Distribution", "Head of Wealth", "Head of Investments", "Business Development"];
 const CARD_AGENTS = ["scout", "analyst", "finder", "writer"];
 const LANE_AGENTS = ["scout", "analyst", "judge", "finder", "writer"];
 const DEFAULT_TEMPLATE = `Hi {{first_name}},
@@ -27,11 +29,13 @@ Best,
 const S = {
   status: null, mode: "demo", runId: null, es: null, t0: 0, running: false, firms: new Map(), rows: new Map(),
   stats: {}, orbit: [], judged: 0, judgeMs: 0, errors: 0, tasks: 0, gauge: { thr: 0, lat: 0 }, target: { thr: 0, lat: 0 },
-  laneCounts: { running: 0, done: 0 }, metrics: {},
+  laneCounts: { running: 0, done: 0 }, metrics: {}, lastSeq: 0, starting: false, integrations: [], mcp: null,
 };
 
 // ------------------------------------------------------------------ brain
-const brain = createBrain($("#brain"), { onReady: () => { $("#cortexState").textContent = "ONLINE"; } });
+let brain;
+try { brain = createBrain($("#brain"), { onReady: () => { $("#cortexState").textContent = "ONLINE"; } }); }
+catch { brain = { setEnergy() {}, pulse() {}, progress: () => 1 }; $("#cortexState").textContent = "2D MODE"; }
 brain.setEnergy(0.15);
 
 // ------------------------------------------------------------------ static UI
@@ -82,42 +86,35 @@ function chipGroup(id, options, selected, key) {
   for (const o of options) {
     const c = el("button", `chip${on.has(o) ? " on" : ""}`, esc(o));
     c.type = "button";
-    c.onclick = () => { c.classList.toggle("on"); store.set(key, values(id).join("|")); };
+    c.setAttribute("aria-pressed", String(on.has(o)));
+    c.onclick = () => { c.classList.toggle("on"); c.setAttribute("aria-pressed", String(c.classList.contains("on"))); store.set(key, values(id).join("|")); };
     box.append(c);
   }
 }
 const values = (id) => [...document.querySelectorAll(`${id} .chip.on`)].map((c) => c.textContent);
 
 async function loadStatus() {
-  S.status = await (await fetch("/api/status")).json();
+  const refresh = $("#refreshStatus");
+  refresh.disabled = true;
+  try {
+  const response = await fetch("/api/status?refresh=1");
+  if (!response.ok) throw new Error("Cannot check providers. Confirm the local server is running.");
+  S.status = await response.json();
   const st = S.status;
   const sel = $("#country");
-  if (!sel.options.length) {
-    const groups = {};
-    for (const c of st.countries) (groups[c.region] ??= []).push(c);
-    for (const [region, list] of Object.entries(groups)) {
-      const og = document.createElement("optgroup");
-      og.label = region;
-      for (const c of list) og.append(new Option(`${c.flag}  ${c.name} · ${c.language}`, c.code));
-      sel.append(og);
-    }
-    sel.value = params.get("country") || store.get("country", "BR");
-    sel.onchange = () => { store.set("country", sel.value); updateTargetTag(); };
-  }
+  renderCountries(sel.value || params.get("country") || store.get("country", "BR"));
   const eng = $("#engine");
-  eng.innerHTML = "";
-  const preferred = ["claude-cli", "openrouter", "anthropic", "codex-cli"];
+  const chosen = selectedEngine(eng.value || store.get("engine", ""), params.get("engine"), st.engines);
+  eng.innerHTML = '<option value="">Select Codex or Claude…</option>';
+  const preferred = ["codex-cli", "claude-cli", "openrouter", "anthropic"];
   for (const id of preferred) {
     const e = st.engines.find((x) => x.id === id);
     if (!e) continue;
-    const o = new Option(`${e.ok ? "●" : "○"} ${e.label}${e.ok ? "" : " — not set up"}`, e.id);
-    o.disabled = !e.ok;
+    const label = id === "codex-cli" ? "Codex · ChatGPT subscription" : id === "claude-cli" ? "Claude · Claude subscription" : `${e.label} · API credits`;
+    const o = new Option(`${e.ok ? "●" : "○"} ${label}`, e.id);
     eng.append(o);
   }
-  eng.value = store.get("engine", "") && st.engines.find((e) => e.id === store.get("engine", ""))?.ok ? store.get("engine", "") : (preferred.find((id) => st.engines.find((e) => e.id === id)?.ok) || "");
-  // Always the Claude plan unless ?engine=... asks for something else.
-  const forced = params.get("engine");
-  eng.value = forced && st.engines.find((e) => e.id === forced)?.ok ? forced : "claude-cli";
+  eng.value = chosen;
   const rb = $("#replayBox");
   rb.innerHTML = "";
   if (st.replays?.length) {
@@ -129,9 +126,37 @@ async function loadStatus() {
   }
   updateTargetTag();
   updateLaunch();
+  } catch (error) {
+    $("#engineNote").textContent = error.message;
+    $("#engineNote").classList.add("bad");
+    $("#launch").disabled = $("#runMode").value !== "demo" || S.running;
+  } finally { refresh.disabled = false; }
+}
+
+function renderCountries(selected) {
+  const countries = S.status?.countries || [];
+  const query = $("#countrySearch").value.trim().toLowerCase();
+  const matches = countries.filter((country) => `${country.name} ${country.code}`.toLowerCase().includes(query));
+  const sel = $("#country");
+  sel.innerHTML = "";
+  const groups = new Map();
+  const current = countries.find((country) => country.code === selected);
+  if (current && !matches.includes(current)) groups.set("Selected country", [current]);
+  for (const country of matches) {
+    if (!groups.has(country.region)) groups.set(country.region, []);
+    groups.get(country.region).push(country);
+  }
+  for (const [region, list] of groups) {
+    const og = document.createElement("optgroup"); og.label = region;
+    for (const country of list) og.append(new Option(`${country.flag} ${country.name} (${country.code})`, country.code));
+    sel.append(og);
+  }
+  sel.value = current?.code || matches[0]?.code || "";
+  $("#countryCount").textContent = query ? `${matches.length} matches · ${countries.length} countries & territories available` : `${countries.length} countries & territories · flags included`;
 }
 
 function updateTargetTag() {
+  if (S.runId && S.runCountry) return;
   const c = S.status?.countries.find((x) => x.code === $("#country").value);
   if (c) $("#targetTag").innerHTML = `TARGET · <b>${c.flag} ${esc(c.name.toUpperCase())}</b><br>${esc(c.language.toUpperCase())}`;
 }
@@ -139,15 +164,39 @@ function updateLaunch() {
   const btn = $("#launch");
   const eng = S.status?.engines.find((e) => e.id === $("#engine").value);
   const cli = $("#engine").value === "claude-cli";
-  $("#modelRow").style.display = cli ? "" : "none";
+  const demo = $("#runMode").value === "demo";
+  $("#modelRow").hidden = !cli;
   const note = $("#engineNote");
-  note.classList.toggle("bad", !eng?.ok);
-  note.textContent = !S.status ? "Checking Claude Code…" : eng?.ok ? (cli ? "Runs on your Claude plan · no API key" : `Engine: ${eng.label}`) : "Claude Code not found. Install it and sign in (see README), then restart.";
-  $("#launchSub").textContent = eng?.ok ? (cli ? "runs on your Claude plan" : eng.label) : "Claude Code needed";
-  btn.disabled = S.running || !eng?.ok;
+  note.classList.toggle("bad", !!eng && !eng.ok);
+  note.textContent = !S.status ? "Checking providers…" : !eng ? "Choose the subscription you want to use. Your choice is saved on this browser." : eng.message || (eng.ok ? `${eng.label} ready` : "Install and sign in, then refresh connection status.");
+  $("#launchSub").textContent = S.starting ? "starting…" : demo ? "fictional demo · no account needed" : eng?.ok ? (cli ? "uses your Claude subscription" : eng.id === "codex-cli" ? "uses your ChatGPT subscription" : eng.label) : "select and connect a provider";
+  btn.disabled = S.running || S.starting || (!demo && !eng?.ok) || !$("#country").value;
+  $("#providerInstructions").innerHTML = eng ? `${eng.setup?.install ? `<div class="field-help">Install</div>${commandLine(eng.setup.install)}` : ""}${eng.setup?.login ? `<div class="field-help">Sign in with your subscription</div>${commandLine(eng.setup.login)}` : ""}${eng.authStatus ? `<div class="field-help">Status: ${esc(eng.authStatus)}. Refresh after signing in.</div>` : ""}` : '<div class="field-help">Select a provider to see its installation and sign-in steps.</div>';
+  wireCommandCopies($("#providerInstructions"));
+}
+
+function commandLine(command) {
+  const url = safeHttpUrl(command);
+  return url ? link(url, "Open official setup instructions") : `<div class="command-line"><code>${esc(command)}</code><button type="button" class="command-copy" data-command="${esc(command)}" title="Copy command">Copy</button></div>`;
+}
+function wireCommandCopies(host) {
+  host.querySelectorAll(".command-copy").forEach((button) => { button.onclick = async () => { try { await navigator.clipboard.writeText(button.dataset.command); button.textContent = "Copied"; } catch { button.textContent = "Select command to copy"; } }; });
 }
 
 function initForm() {
+  chipGroup("#types", TYPES, ["Asset managers"], "types");
+  chipGroup("#roles", ROLES, ["CEO", "CIO", "Head of Partnerships", "Head of Distribution"], "roles");
+  $("#countrySearch").oninput = () => renderCountries($("#country").value || store.get("country", "BR"));
+  $("#country").onchange = () => { store.set("country", $("#country").value); updateTargetTag(); updateLaunch(); };
+  $("#engine").onchange = () => { store.set("engine", $("#engine").value); updateLaunch(); renderMcp(); };
+  $("#refreshStatus").onclick = async () => { await loadStatus(); await loadConnections(); };
+  $("#runMode").value = params.has("demo") || params.get("autorun") === "demo" ? "demo" : store.get("runMode", "live");
+  $("#runMode").onchange = () => { store.set("runMode", $("#runMode").value); updateLaunch(); };
+  for (const id of ["contactsPerFirm", "researchDepth", "exclude"]) {
+    const input = $(`#${id}`); input.value = store.get(id, input.value);
+    input.onchange = () => store.set(id, input.value);
+  }
+  for (const id of ["leadSearch", "emailFilter", "fitFilter"]) $(`#${id}`).oninput = filterBoard;
   $("#template").value = store.get("template", DEFAULT_TEMPLATE);
   $("#template").oninput = () => store.set("template", $("#template").value);
   $("#sender").value = store.get("sender", "");
@@ -163,62 +212,201 @@ function initForm() {
   $("#claudeModel").value = store.get("claudeModel", "sonnet");
   $("#claudeModel").onchange = () => store.set("claudeModel", $("#claudeModel").value);
   $("#launch").onclick = launch;
-  $("#stop").onclick = () => S.runId && fetch(`/api/runs/${S.runId}/stop`, { method: "POST" });
+  $("#stop").onclick = async () => {
+    if (!S.runId) return;
+    $("#stop").disabled = true;
+    try { const response = await fetch(`/api/runs/${encodeURIComponent(S.runId)}/stop`, { method: "POST" }); if (!response.ok) throw new Error("Could not stop this run. Check the server connection."); }
+    catch (error) { showFormMessage(error.message); $("#stop").disabled = !S.running; }
+  };
   $("#lbMax").onclick = () => { const on = document.body.classList.toggle("board-max"); $("#lbMax").textContent = on ? "⤡ BACK" : "⤢ EXPAND"; if (!on) setTimeout(buildRing, 50); };
   $("#drawer").onclick = (e) => { if (e.target === $("#drawer")) closeDrawer(); };
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeDrawer();
+    if (e.key === "Tab" && !$("#drawer").hidden) {
+      const items = [...$("#drawerCard").querySelectorAll('button, a[href], input, [tabindex="0"]')];
+      if (!items.length) return;
+      const first = items[0], last = items.at(-1);
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === $("#drawerCard"))) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  });
   $("#dl").onclick = () => { if (S.runId && $("#dl").classList.contains("ready")) location.href = `/api/runs/${S.runId}/excel`; };
+  $("#dlCsv").onclick = () => { if (S.runId && !$("#dlCsv").disabled) location.href = `/api/runs/${encodeURIComponent(S.runId)}/csv`; };
+}
+
+function showFormMessage(message = "") { $("#formMessage").textContent = message; $("#formMessage").hidden = !message; }
+
+async function loadConnections() {
+  try {
+    const [integrations, mcp] = await Promise.all([fetch("/api/integrations"), fetch("/api/mcp")]);
+    if (integrations.ok) { const data = await integrations.json(); S.integrations = Array.isArray(data) ? data : data.integrations || []; }
+    if (mcp.ok) S.mcp = await mcp.json();
+    renderIntegrations(); renderMcp();
+  } catch { $("#integrationMessage").textContent = "Connection status unavailable. Use Refresh connection status to retry."; }
+}
+
+function renderIntegrations() {
+  const box = $("#integrationsList"); box.innerHTML = "";
+  for (const integration of S.integrations) {
+    const item = el("div", "integration-item");
+    item.innerHTML = `<div class="connection-head"><strong>${esc(integration.label || integration.name || integration.id)}</strong><span class="connection-status ${integration.status === "ready" ? "ok" : integration.status === "error" ? "bad" : ""}">${integration.status === "ready" ? "Tested" : integration.status === "error" ? "Check key" : integration.connected ? "Key saved · untested" : "Optional · no key"}</span></div>${integration.description ? `<div class="field-help">${esc(integration.description)}</div>` : ""}<div class="connection-links">${link(integration.setupUrl || integration.keyUrl, "Get an API key")}${integration.docsUrl ? ` · ${link(integration.docsUrl, "Setup guide")}` : ""}</div><label class="sr-only" for="key-${esc(integration.id)}">${esc(integration.label || integration.id)} API key</label><input id="key-${esc(integration.id)}" type="password" autocomplete="off" placeholder="Paste API key to connect" spellcheck="false"><div class="connection-actions"><button type="button" class="connect-key quiet-btn">${integration.connected ? "Replace key" : "Connect"}</button><button type="button" class="test-key quiet-btn" ${integration.connected ? "" : "disabled"}>Test</button><button type="button" class="remove-key quiet-btn" ${integration.connected ? "" : "disabled"}>Disconnect</button></div><div class="connection-message" role="status" aria-live="polite">${esc(integration.message || "")}</div>`;
+    const input = item.querySelector("input");
+    const request = async (method, suffix = "", apiKey) => {
+      const message = item.querySelector(".connection-message");
+      item.querySelectorAll("button").forEach((button) => { button.disabled = true; });
+      message.textContent = "Checking…";
+      try {
+        const response = await fetch(`/api/integrations/${encodeURIComponent(integration.id)}${suffix}`, { method, headers: { "Content-Type": "application/json" }, ...(apiKey ? { body: JSON.stringify({ apiKey }) } : {}) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Connection failed. Check the service key and try again.");
+        input.value = "";
+        await loadConnections();
+        $("#integrationMessage").textContent = result.message || `${integration.label || integration.id}: ${method === "DELETE" ? "disconnected" : suffix ? "connection tested" : "key saved locally"}.`;
+      } catch (error) { message.textContent = error.message; item.querySelectorAll("button").forEach((button) => { button.disabled = false; }); }
+    };
+    item.querySelector(".connect-key").onclick = () => {
+      const key = input.value.trim();
+      if (!key) { item.querySelector(".connection-message").textContent = "Paste a service API key first."; input.focus(); return; }
+      request("PUT", "", key);
+    };
+    item.querySelector(".test-key").onclick = () => request("POST", "/test");
+    item.querySelector(".remove-key").onclick = () => request("DELETE");
+    box.append(item);
+  }
+}
+
+function renderMcp() {
+  const box = $("#mcpList"); box.innerHTML = '<div class="connection-head"><strong>Provider MCP tools</strong></div><div class="field-help">Register Hunter or Apollo with Codex or Claude, then complete the service sign-in. Registration alone does not confirm authentication.</div>';
+  if (S.mcp?.message) box.append(el("div", "field-help", esc(S.mcp.message)));
+  const engine = $("#engine").value;
+  const provider = (S.mcp?.providers || []).find((entry) => entry.id === engine);
+  if (provider?.servers?.length) box.append(el("div", "field-help", provider.servers.map((server) => esc(typeof server === "string" ? server : `${server.name || server.id}: ${server.status || "registered"}`)).join("<br>")));
+  const tools = S.mcp?.integrations || S.mcp?.setup || [
+    { id: "hunter", label: "Hunter", url: "https://hunter.io/mcp" },
+    { id: "apollo", label: "Apollo", url: "https://docs.apollo.io/docs/apollo-mcp" },
+  ];
+  for (const tool of tools) {
+    if (!["hunter", "apollo"].includes(tool.id)) continue;
+    const item = el("div", "mcp-item");
+    const command = engine === "claude-cli" ? tool.claudeCommand : tool.command;
+    item.innerHTML = `${link(tool.docsUrl || tool.url || tool.setupUrl, `${tool.label || tool.id} MCP setup`)}<button type="button" class="quiet-btn" ${["codex-cli", "claude-cli"].includes(engine) ? "" : "disabled"}>Add to ${engine === "codex-cli" ? "Codex" : engine === "claude-cli" ? "Claude" : "selected provider"}</button>${command && engine ? `<details class="setup"><summary>Manual setup command</summary>${commandLine(command)}</details>` : ""}<div class="connection-message" role="status"></div>`;
+    const button = item.querySelector("button");
+    button.onclick = async () => {
+      button.disabled = true;
+      try {
+        const response = await fetch(`/api/mcp/${encodeURIComponent(engine)}/${encodeURIComponent(tool.id)}/setup`, { method: "POST" });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "MCP registration failed.");
+        const message = item.querySelector(".connection-message");
+        message.innerHTML = `${esc(result.message || "MCP server registered. Complete the service sign-in before research.")}${result.authCommand ? commandLine(result.authCommand) : ""}`;
+        wireCommandCopies(message);
+      } catch (error) { item.querySelector(".connection-message").textContent = error.message; }
+      finally { button.disabled = false; }
+    };
+    box.append(item);
+    wireCommandCopies(item);
+  }
+  box.append(el("div", "connection-links", `${link("https://claude.ai/directory/connectors/apollo", "Apollo for Claude")} · ${link("https://chatgpt.com/apps/apollo-io/asdk_app_69bd664f2a908191a3a0a47eca8559d1", "Apollo for ChatGPT")}`));
 }
 
 // ------------------------------------------------------------------ run lifecycle
 function resetRunUI() {
   S.firms.clear(); S.rows.clear(); S.orbit = []; S.judged = 0; S.judgeMs = 0; S.errors = 0; S.tasks = 0;
-  S.laneCounts = { running: 0, done: 0 }; S.target = { thr: 0, lat: 0 };
+  S.laneCounts = { running: 0, done: 0 }; S.target = { thr: 0, lat: 0 }; S.metrics = {}; S.lastSeq = 0;
   $("#rows").innerHTML = '<div class="empty" id="lbEmpty">Ranked by fit as the crew works. Click a row for the details.</div>'; $("#log").innerHTML = "";
-  for (const id of ["#lbFound", "#lbScored", "#lbStrong", "#lbEmails"]) $(id).textContent = "0";
+  for (const id of ["#lbFound", "#lbScored", "#lbStrong", "#lbContacts", "#lbEmails"]) $(id).textContent = "0";
   document.querySelectorAll(".st").forEach((n) => n.classList.remove("active", "done"));
   document.querySelectorAll(".lane .lc").forEach((n) => (n.innerHTML = ""));
   document.querySelectorAll(".lane .ld").forEach((n) => (n.textContent = "0"));
   buildAgents();
   $("#dl").classList.remove("ready"); $("#dl").disabled = true;
+  $("#dlCsv").disabled = true;
+  $("#filterEmpty").hidden = true;
   $("#banner").classList.remove("win");
   for (const id of ["#hFpm", "#hInf", "#hFound", "#hVer", "#hStrong", "#tTasks", "#tErr", "#bReady", "#bTotal"]) $(id).textContent = "0";
   $("#result").textContent = "RESULT · AWAITING SIGNAL";
 }
 
 async function launch() {
+  if (S.running || S.starting) return;
+  showFormMessage();
+  if (!values("#types").length || !values("#roles").length) { showFormMessage("Select at least one firm type and decision-maker role."); return; }
   const body = {
-    mode: params.has("demo") ? "demo" : "live", engine: $("#engine").value, country: $("#country").value,
-    types: ["Asset managers"], segments: [], roles: ["CEO", "Head of Partnerships", "Head of Distribution"],
+    mode: $("#runMode").value, engine: $("#engine").value, country: $("#country").value,
+    types: values("#types"), segments: [], roles: values("#roles"),
     minAum: "auto", firms: Number($("#firms").value), minFit: Number($("#minFit").value),
+    contactsPerFirm: Number($("#contactsPerFirm").value), researchDepth: $("#researchDepth").value,
     exclude: $("#exclude").value, template: $("#template").value, sender: $("#sender").value,
     localLanguage: $("#localLanguage").checked, personalize: $("#personalize").checked,
     speed: Number(params.get("speed")) || 1,
     drafts: $("#drafts").checked, claudeModel: $("#claudeModel").value,
   };
-  const res = await fetch("/api/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  const j = await res.json();
-  if (!res.ok) { logLine({ level: "err", agent: "pipeline", text: j.error || "Could not start" }); return; }
-  connect(j.id);
+  S.starting = true; updateLaunch();
+  try {
+    const res = await fetch("/api/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const j = await res.json();
+    if (!res.ok) throw new Error(j.error || "Could not start research.");
+    connect(j.id);
+  } catch (error) { showFormMessage(error.message); logLine({ level: "err", agent: "pipeline", text: error.message }); }
+  finally { S.starting = false; updateLaunch(); }
 }
 async function startReplay(id) {
-  const j = await (await fetch(`/api/replay/${id}?speed=${params.get("speed") || 4}`, { method: "POST" })).json();
-  if (j.id) connect(j.id);
+  if (S.running || S.starting) return;
+  S.starting = true; updateLaunch(); showFormMessage();
+  try {
+    const response = await fetch(`/api/replay/${encodeURIComponent(id)}?speed=${Number(params.get("speed")) || 4}`, { method: "POST" });
+    const result = await response.json();
+    if (!response.ok || !result.id) throw new Error(result.error || "Could not load this saved run.");
+    connect(result.id);
+  } catch (error) { showFormMessage(error.message); }
+  finally { S.starting = false; updateLaunch(); }
 }
 
-function connect(id) {
+function connect(id, startedAt = Date.now()) {
   S.es?.close();
   resetRunUI();
-  S.runId = id; S.t0 = performance.now(); S.running = true;
+  S.runId = id; S.t0 = performance.now() - Math.max(0, Date.now() - startedAt); S.running = true;
+  store.set("lastRun", id);
   $("#stop").disabled = false;
   $(".track").classList.add("running");
   $("#loopState").textContent = "RUNNING";
   updateLaunch();
   brain.setEnergy(1);
   setTicker("scout", "starting up…");
-  const es = new EventSource(`/api/runs/${id}/events`);
+  const es = new EventSource(`/api/runs/${encodeURIComponent(id)}/events`);
   S.es = es;
-  es.onmessage = (m) => handle(JSON.parse(m.data));
+  es.onmessage = (message) => {
+    try {
+      const event = JSON.parse(message.data);
+      const seq = Number(event.seq || message.lastEventId || 0);
+      if (seq && seq <= S.lastSeq) return;
+      if (seq) S.lastSeq = seq;
+      handle(event);
+    } catch (error) { logLine({ level: "err", agent: "pipeline", text: `Could not display a progress event: ${error.message}` }); }
+  };
+  es.onopen = () => { if (S.running) { $("#loopState").textContent = "RUNNING"; showFormMessage(); } };
+  es.onerror = async () => {
+    if (!S.running || S.es !== es) return;
+    $("#loopState").textContent = "RECONNECTING";
+    showFormMessage("Connection interrupted. Reconnecting to your research…");
+    try {
+      const response = await fetch(`/api/runs/${encodeURIComponent(id)}`);
+      if (response.status === 404 && S.es === es) {
+        es.close(); S.running = false; $("#stop").disabled = true; $(".track").classList.remove("running");
+        $("#loopState").textContent = "UNAVAILABLE";
+        showFormMessage("This run is no longer available on the server. Start a new run or replay a saved one."); updateLaunch();
+      }
+    } catch { /* EventSource continues retrying while the server is offline. */ }
+  };
+}
+
+async function restoreLastRun() {
+  const id = store.get("lastRun", "");
+  if (!id || params.get("autorun") || params.get("replay")) return;
+  try {
+    const response = await fetch(`/api/runs/${encodeURIComponent(id)}`);
+    if (response.ok) { const snapshot = await response.json(); connect(id, snapshot.startedAt); }
+  } catch { /* An offline server must not prevent the dashboard from opening. */ }
 }
 
 function handle(e) {
@@ -227,13 +415,17 @@ function handle(e) {
     case "run": {
       const pill = $("#modePill");
       pill.className = `pill ${e.mode}`;
-      pill.textContent = e.mode === "demo" ? "DEMO · FICTIONAL DATA" : e.mode === "replay" ? `REPLAY · ${e.speed}×` : "LIVE · CLAUDE PLAN";
+      pill.textContent = e.mode === "demo" ? "DEMO · FICTIONAL DATA" : e.mode === "replay" ? `REPLAY · ${e.speed}×` : `LIVE · ${e.engine === "codex-cli" ? "CODEX" : e.engine === "claude-cli" ? "CLAUDE" : "API"}`;
       const eng = S.status?.engines.find((x) => x.id === e.engine);
       $("#engineLabel").textContent = e.mode === "demo" ? "DEMO ENGINE" : (eng?.label || e.engine).toUpperCase();
-      $("#coreModel").textContent = e.mode === "demo" ? "JEV (SIMULATED)" : e.engine === "openrouter" ? "JEV ROUTER" : e.engine === "claude-cli" ? "CLAUDE JUDGE" : String(e.judge || "").toUpperCase();
-      $("#stackLabel").innerHTML = e.mode === "demo" ? "DEMO <em>·</em> FICTIONAL DATA" : e.engine === "openrouter" ? "JEV <em>+</em> CLAUDE OPUS 5.5" : e.engine === "claude-cli" ? `CLAUDE ${String(e.config.claudeModel || "").toUpperCase()} <em>·</em> YOUR CLAUDE PLAN` : esc(String(e.model || "").toUpperCase());
+      $("#coreModel").textContent = e.mode === "demo" ? "SIMULATED JUDGE" : e.engine === "codex-cli" ? "CODEX JUDGE" : e.engine === "claude-cli" ? "CLAUDE JUDGE" : String(e.judge || "").toUpperCase();
+      $("#stackLabel").innerHTML = e.mode === "demo" ? "DEMO <em>·</em> FICTIONAL DATA" : e.engine === "codex-cli" ? "CODEX <em>·</em> YOUR CHATGPT PLAN" : e.engine === "claude-cli" ? `CLAUDE ${esc(String(e.config.claudeModel || "").toUpperCase())} <em>·</em> YOUR CLAUDE PLAN` : esc(String(eng?.label || e.engine).toUpperCase());
+      S.mode = e.mode;
+      S.runCountry = e.country;
+      const activeServices = Object.entries(e.config.integrations || {}).filter(([, configured]) => configured).map(([name]) => name);
+      $("#integrationMessage").textContent = activeServices.length ? `Configured for this run: ${activeServices.join(", ")}. Each contact shows the sources actually used.` : "This run uses public web research. Optional API connections can expand coverage.";
       setWriter(!!e.config.drafts);
-      $("#telemetryMode").textContent = e.mode === "replay" ? "replay" : "live";
+      $("#telemetryMode").textContent = e.mode;
       $("#targetTag").innerHTML = `TARGET · <b>${e.country.flag} ${esc(e.country.name.toUpperCase())}</b><br>${esc(e.country.language.toUpperCase())} · ${e.config.firms} FIRMS`;
       break;
     }
@@ -252,7 +444,7 @@ function handle(e) {
     case "metrics": onMetrics(e); break;
     case "activity": onActivity(e); break;
     case "log": logLine(e); break;
-    case "error": logLine({ level: "err", agent: "pipeline", text: e.message }); break;
+    case "error": showFormMessage(e.message); logLine({ level: "err", agent: "pipeline", text: e.message }); break;
     case "done": onDone(e); break;
   }
 }
@@ -295,7 +487,7 @@ function onTask(e) {
     else { st.done++; S.laneCounts.done++; }
     st.ms += e.ms || 0;
     st.bars.push(Math.min(34, 4 + (e.ms || 0) / 120)); st.bars = st.bars.slice(-14);
-    const tsec = ((performance.now() - S.t0) / 1000).toFixed(1);
+    const tsec = Number((e.t ?? (performance.now() - S.t0)) / 1000).toFixed(1);
     st.lines.unshift(`<span class="t">t+${tsec}</span> ${esc(e.label)} · ${e.state === "error" ? '<span style="color:var(--red)">err</span>' : "ok"}`);
     st.lines = st.lines.slice(0, 3);
     const tk = document.getElementById(`tk-${e.id}`);
@@ -328,10 +520,10 @@ function onActivity(e) {
   const f = e.firmId ? S.firms.get(e.firmId) : null;
   const label = f ? `${e.text} (${f.name.split(" (")[0].slice(0, 26)})` : e.text;
   setTicker(a, label);
-  logLine({ level: "info", agent: a, text: `▸ ${label}` });
+  logLine({ level: "info", agent: a, text: `▸ ${label}`, t: e.t });
   const st = S.stats[a];
   if (st) {
-    const tsec = ((performance.now() - S.t0) / 1000).toFixed(1);
+    const tsec = Number((e.t ?? (performance.now() - S.t0)) / 1000).toFixed(1);
     st.lines.unshift(`<span class="t">t+${tsec}</span> <span class="act">${esc(e.text)}</span>`);
     st.lines = st.lines.slice(0, 3);
     if (CARD_AGENTS.includes(a)) renderCard(a);
@@ -356,11 +548,16 @@ function renderCard(a) {
 
 // ------------------------------------------------------------------ lead table + radar data
 function addFirm(f) {
+  if (S.firms.has(f.id)) { updateFirm(f.id, f); return; }
   S.firms.set(f.id, { ...f, angle: hashAngle(f.id), seq: S.firms.size });
   $("#lbEmpty")?.remove();
   const row = el("div", "tr");
   row.dataset.id = f.id;
+  row.tabIndex = 0;
+  row.setAttribute("role", "button");
+  row.setAttribute("aria-label", `Open details for ${f.name}`);
   row.onclick = () => openDrawer(f.id);
+  row.onkeydown = (event) => { if (event.target === row && ["Enter", " "].includes(event.key)) { event.preventDefault(); openDrawer(f.id); } };
   $("#rows").append(row);
   S.rows.set(f.id, row);
   renderRow(f.id);
@@ -377,7 +574,7 @@ function updateFirm(id, patch) {
   const row = S.rows.get(id);
   row?.classList.add("flash"); setTimeout(() => row?.classList.remove("flash"), 500);
   boardStats();
-  if ($("#drawer").dataset.id === id && !$("#drawer").hidden) openDrawer(id);
+  if ($("#drawer").dataset.id === id && !$("#drawer").hidden) openDrawer(id, true);
 }
 function rankAll() {
   const list = [...S.firms.values()].sort((a, b) => (b.fit ?? -1) - (a.fit ?? -1) || (b.fitConfidence ?? 0) - (a.fitConfidence ?? 0) || a.seq - b.seq);
@@ -385,11 +582,26 @@ function rankAll() {
 }
 function boardStats() {
   const all = [...S.firms.values()];
+  const totals = summarizeFirms(all);
   $("#lbFound").textContent = all.length;
   $("#lbScored").textContent = all.filter((f) => f.fit != null).length;
   $("#lbStrong").textContent = all.filter((f) => (f.fit ?? 0) >= 4).length;
-  $("#lbEmails").textContent = all.filter((f) => f.email && f.emailStatus !== "No mail server").length;
+  $("#lbContacts").textContent = totals.contacts;
+  $("#lbEmails").textContent = totals.emails;
+  $("#hVer").textContent = totals.emails;
   rankAll();
+  filterBoard();
+}
+function filterBoard() {
+  const filters = { search: $("#leadSearch").value, email: $("#emailFilter").value, fit: $("#fitFilter").value };
+  let visible = 0;
+  for (const firm of S.firms.values()) {
+    const match = matchesFirm(firm, filters);
+    const row = S.rows.get(firm.id); if (row) row.hidden = !match;
+    if (match) visible++;
+  }
+  $("#resultCount").textContent = `${visible} of ${S.firms.size} firms`;
+  $("#filterEmpty").hidden = !S.firms.size || !!visible;
 }
 const shortAum = (s) => { const m = String(s || "").match(/(US\$|R\$|\$|MX\$|€|£)?\s?[\d.,]+\s?(trillion|billion|million|bn|tn|mn|B|M|T)\b/i); return m ? m[0].replace(/\s+/g, " ") : ""; };
 const chip = (st) => `<span class="chip-e ${esc(String(st || "pending").split(" ")[0])}">${esc(String(st || "pending").toUpperCase())}</span>`;
@@ -403,25 +615,38 @@ function renderRow(id) {
   const aum = shortAum(f.aum);
   const firm = `<span class="c2"><span class="firm" title="${esc(f.name)}">${esc(f.name)}</span><span class="sub">${esc([f.city, aum].filter(Boolean).join(" · ") || f.type || "")}</span></span>`;
   const inv = `<span class="c2"><span title="${esc(f.assetClasses || "")}">${esc(f.assetClasses || (f.fit == null ? "reading…" : "—"))}</span><span class="sub">${esc(f.globalEquity && f.globalEquity !== "Unknown" ? `global equity: ${f.globalEquity.toLowerCase()}` : "")}</span></span>`;
-  const person = f.contactName ? `<span class="c2"><span>${esc(f.contactName)}</span><span class="sub" title="${esc(f.contactTitle)}">${esc(f.contactTitle)}</span></span>`
-    : `<span class="mute">${f.status === "Not a fit" ? "skipped" : f.fit == null ? "…" : "finding…"}</span>`;
-  const email = f.email ? `<span class="c2"><span class="em" title="${esc(f.email)}">${esc(f.email)}</span><span class="sub">${chip(f.emailStatus)}<span class="pat">${esc(f.emailPattern || "")}</span></span></span>`
+  const contacts = contactsForFirm(f);
+  const primary = contacts.find(hasEmailEvidence) || contacts.find(hasUsableEmail) || contacts[0];
+  const emails = [...new Set(contacts.filter(hasUsableEmail).map((contact) => contact.email))];
+  const person = primary?.name ? `<span class="c2"><span>${esc(primary.name)}${contacts.length > 1 ? ` <span class="more-people">+${contacts.length - 1}</span>` : ""}</span><span class="sub" title="${esc(primary.title)}">${esc(primary.title)}</span></span>`
+    : `<span class="mute">${f.status === "Not a fit" ? "skipped" : f.stage === "done" ? "No contact found" : f.fit == null ? "…" : "finding…"}</span>`;
+  const email = primary?.email ? `<span class="c2"><span class="em" title="${esc(primary.email)}">${esc(primary.email)}</span><span class="sub">${chip(primary.emailStatus)}${emails.length > 1 ? `<span class="pat">+${emails.length - 1} emails</span>` : ""}</span></span>`
     : `<span class="c2"><span class="em none">${f.emailStatus ? "no email" : f.status === "Not a fit" ? "—" : "…"}</span><span class="sub">${f.emailStatus ? chip(f.emailStatus) : ""}</span></span>`;
-  const copy = f.email ? `<button class="copy" title="Copy email">⧉</button>` : "<span></span>";
+  const copy = emails.length ? `<button class="copy" title="Copy ${emails.length > 1 ? "all firm emails" : "email"}" aria-label="Copy ${emails.length > 1 ? "all firm emails" : "email"}">⧉</button>` : "<span></span>";
   row.innerHTML = `<span class="mute rk">··</span>${firm}${inv}<span>${fitCell}</span>${person}${email}${copy}`;
   const cb = row.querySelector(".copy");
-  if (cb) cb.onclick = (ev) => { ev.stopPropagation(); navigator.clipboard?.writeText(f.email).then(() => { cb.classList.add("done"); cb.textContent = "✓"; setTimeout(() => { cb.classList.remove("done"); cb.textContent = "⧉"; }, 1200); }).catch(() => {}); };
+  if (cb) cb.onclick = async (ev) => { ev.stopPropagation(); try { await navigator.clipboard.writeText(emails.join("\n")); cb.classList.add("done"); cb.textContent = "✓"; setTimeout(() => { cb.classList.remove("done"); cb.textContent = "⧉"; }, 1200); } catch { showFormMessage("Clipboard unavailable. Open the firm details to select and copy its emails."); } };
   rankAll();
 }
-const link = (u, t) => /^https?:\/\//.test(u || "") ? `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(t || u)}</a>` : esc(t || u || "—");
-function openDrawer(id) {
+const link = (u, t) => { const url = safeHttpUrl(u); return url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(t || url)}</a>` : esc(t || u || "—"); };
+let drawerReturnFocus = null;
+function renderContact(contact, index) {
+  const explanations = { Verified: "Verified by an email verification service. Delivery is not guaranteed.", Published: "Found on a public source. Review the linked evidence.", Inferred: "Inferred from an observed firm email pattern. Not verified.", Guess: "Guessed address. Confirm independently before outreach.", "No mail server": "The domain has no usable mail server.", "Not found": "No email found from the available sources." };
+  const checks = { not_checked: "Not checked", mx_present: "Mail server exists; this mailbox has not been verified", mx_missing: "No mail server", unknown: "Verification inconclusive", valid: "Service reports mailbox valid", accept_all: "Catch-all domain; individual mailbox not confirmed", invalid: "Service reports invalid" };
+  const sources = [...new Set([contact.sourceUrl, contact.emailEvidenceUrl, ...(contact.sourceUrls || [])].filter((url) => safeHttpUrl(url)))];
+  return `<article class="contact-card"><div class="contact-head"><strong>${esc(contact.name || `Contact ${index + 1}`)}</strong>${contact.linkedin ? link(contact.linkedin, "LinkedIn") : ""}</div><div class="dr-v">${esc(contact.title || "Role not found")}</div><div class="contact-email">${contact.email ? `<span class="dr-email">${esc(contact.email)}</span>${chip(contact.emailStatus)}` : '<span class="mute">No email found</span>'}</div><div class="field-help">${esc(explanations[contact.emailStatus] || "Review the source and verification status before outreach.")}</div>${contact.emailCheck ? `<div class="field-help">Check: ${esc(checks[contact.emailCheck] || contact.emailCheck)}${contact.verificationProvider ? ` · ${esc(contact.verificationProvider)}` : ""}</div>` : ""}${contact.emailPattern ? `<div class="field-help">Pattern: ${esc(contact.emailPattern)}</div>` : ""}${contact.emailEvidence ? `<div class="dr-v contact-evidence">${esc(contact.emailEvidence)}</div>` : ""}${contact.provider ? `<div class="field-help">Contact source: ${esc(contact.provider)}</div>` : ""}${sources.length ? `<div class="contact-sources">${sources.map((url, i) => link(url, `Source ${i + 1}`)).join(" · ")}</div>` : ""}</article>`;
+}
+function openDrawer(id, updating = false) {
   const f = S.firms.get(id);
   if (!f) return;
   const d = $("#drawer");
+  const card = $("#drawerCard");
+  const scrollTop = card.scrollTop;
+  if (!updating) drawerReturnFocus = document.activeElement;
   d.dataset.id = id;
-  const conf = f.fitConfidence != null ? `${Math.round(f.fitConfidence * 100)}% sure` : "";
-  const ekey = { Verified: "checked by Hunter", Published: "seen on a public page", Inferred: "built from the firm's email pattern", Guess: "common format, no example found - check before sending", "No mail server": "the domain doesn't accept email" }[f.emailStatus] || "";
-  $("#drawerCard").innerHTML = `<button class="dr-close" title="Close">✕</button>
+  const conf = f.fitConfidence != null ? `${Math.round(f.fitConfidence * 100)}% model confidence` : "";
+  const contacts = contactsForFirm(f);
+  card.innerHTML = `<button class="dr-close" title="Close" aria-label="Close firm details">✕</button>
     <div class="dr-top"><div><div class="dr-name">${esc(f.name)}</div><div class="dr-sub">${esc([f.type, f.city, f.country].filter(Boolean).join(" · "))} · ${link(f.website)}</div></div>
       <div class="dr-fit"><b class="fitn ${(f.fit ?? 0) >= 4 ? "" : f.fit === 3 ? "mid" : "low"}">${f.fit ?? "–"}<small style="font-size:13px">/5</small></b><span>FIT ${esc(conf)}</span></div></div>
     <div class="dr-sec"><div class="dr-k">WHY</div><div class="dr-v">${esc(f.why || "Scoring…")}</div></div>
@@ -431,41 +656,52 @@ function openDrawer(id) {
       <div><div class="dr-k">CLIENTS</div><div class="dr-v">${esc(f.segment || "—")}</div></div>
       <div><div class="dr-k">GLOBAL EQUITY TODAY</div><div class="dr-v">${esc(f.globalEquity || "—")}${f.globalEquityEvidence ? ` · ${esc(f.globalEquityEvidence)}` : ""}</div></div>
     </div>
-    <div class="dr-sec"><div class="dr-k">DECISION-MAKER</div><div class="dr-v">${esc(f.contactName || "—")}${f.contactTitle ? ` · ${esc(f.contactTitle)}` : ""}${f.linkedin ? ` · ${link(f.linkedin, "LinkedIn")}` : ""}</div></div>
-    <div class="dr-sec"><div class="dr-k">EMAIL</div><div class="dr-v">${f.email ? `<span class="dr-email">${esc(f.email)}</span>${chip(f.emailStatus)}${f.emailScore != null ? `${esc(String(f.emailScore))}% confidence` : ""}` : "—"}
-      ${ekey ? `<br><span class="mute">${esc(ekey)}</span>` : ""}${f.emailPattern ? `<br>Pattern: <b>${esc(f.emailPattern)}</b>` : ""}${f.emailEvidence ? `<br>Evidence: ${esc(f.emailEvidence)}` : ""}</div></div>
+    <div class="dr-sec"><div class="dr-k">DECISION-MAKERS · ${contacts.length}</div>${contacts.length ? contacts.map(renderContact).join("") : '<div class="dr-v">No contacts found yet.</div>'}</div>
+    ${f.body || f.draft || f.subject || f.emailDraft ? `<div class="dr-sec"><div class="dr-k">OUTREACH DRAFT</div><div class="dr-v draft-text">${esc(f.subject || "")}${f.subject ? "\n\n" : ""}${esc(f.body || f.draft || f.emailDraft || "")}</div></div>` : ""}
     ${f.news ? `<div class="dr-sec"><div class="dr-k">RECENT NEWS</div><div class="dr-v">${esc(f.news)}</div></div>` : ""}
     <div class="dr-sec"><div class="dr-k">SOURCE</div><div class="dr-v">${esc(f.source || "")} ${f.sourceUrl ? `· ${link(f.sourceUrl, "link")}` : ""}</div></div>`;
   $("#drawerCard .dr-close").onclick = closeDrawer;
   d.hidden = false;
+  card.scrollTop = updating ? scrollTop : 0;
+  if (!updating) card.focus();
 }
-function closeDrawer() { $("#drawer").hidden = true; }
+function closeDrawer() { const wasOpen = !$("#drawer").hidden; $("#drawer").hidden = true; if (wasOpen) drawerReturnFocus?.focus(); }
 function hashAngle(s) { let h = 2166136261; for (const ch of s) h = Math.imul(h ^ ch.charCodeAt(0), 16777619); return ((h >>> 0) % 3600) / 3600 * Math.PI * 2; }
 
 function onMetrics(m) {
   S.metrics = m;
   $("#hFpm").textContent = Number(m.firmsPerMin || 0).toFixed(1);
   $("#hInf").textContent = m.inFlight ?? 0;
-  $("#hVer").textContent = m.emails ?? m.verified ?? 0;
+  $("#hVer").textContent = summarizeFirms([...S.firms.values()]).emails;
   $("#hStrong").textContent = [...S.firms.values()].filter((f) => (f.fit ?? 0) >= 4).length;
-  $("#bReady").textContent = m.meetingReady ?? 0;
+  $("#bReady").textContent = [...S.firms.values()].filter((firm) => (firm.fit ?? 0) >= 4 && contactsForFirm(firm).some(hasEmailEvidence)).length;
   S.target.thr = Number(m.firmsPerMin || 0);
   S.target.lat = Number(m.latencyMs || 0) / 1000;
 }
 
 function onDone(e) {
+  const summary = e.summary || e;
+  const partial = summary.partial && !summary.stopped && !summary.failed || summary.outcome === "partial" || summary.state === "partial";
   S.running = false;
+  S.es?.close();
   clearTimeout(tickerIdle);
-  setTicker(null, e.summary?.stopped ? "stopped" : `done · ${e.summary?.firms ?? 0} firms · ${S.metrics.emails ?? 0} emails · Excel ready`, false);
+  const totals = summarizeFirms([...S.firms.values()]);
+  setTicker(null, summary.failed ? `research failed · ${totals.firms ? "partial results available" : "no firms found"}` : summary.stopped ? "stopped · partial results available" : `${partial ? "partial results" : "done"} · ${totals.firms} firms · ${totals.contacts} people · ${totals.emails} emails · export ready`, false);
   $("#stop").disabled = true;
   $(".track").classList.remove("running");
-  $("#loopState").textContent = e.summary?.stopped ? "STOPPED" : "COMPLETE";
-  document.querySelectorAll(".st").forEach((n) => { n.classList.remove("active"); n.classList.add("done"); });
+  $("#loopState").textContent = summary.failed ? "FAILED" : summary.stopped ? "STOPPED" : partial ? "PARTIAL" : "COMPLETE";
+  $("#modePill").className = `pill ${S.mode === "demo" ? "demo" : S.mode === "replay" ? "replay" : ""}`;
+  $("#modePill").textContent = `${S.mode.toUpperCase()} · ${$("#loopState").textContent}`;
+  $("#tElapsed").textContent = Number(summary.seconds ?? (e.t || 0) / 1000).toFixed(1);
+  const outcomeMessage = summary.error || summary.message || (partial ? `Partial results: ${summary.failedFirms || 0} firms had research errors. Review the event log and exported evidence.` : "");
+  if (outcomeMessage || summary.warnings?.length) showFormMessage([outcomeMessage, ...(summary.warnings || [])].filter(Boolean).join(" "));
+  document.querySelectorAll(".st").forEach((n) => { n.classList.remove("active"); if (!summary.failed && !summary.stopped && !partial) n.classList.add("done"); });
   $("#dl").classList.add("ready"); $("#dl").disabled = false;
-  $("#banner").classList.add("win");
+  $("#dlCsv").disabled = false;
+  $("#banner").classList.toggle("win", !summary.failed && !summary.stopped && !partial);
   brain.setEnergy(0.35);
   for (let i = 0; i < 8; i++) setTimeout(() => brain.pulse(["#2cf5b5", "#ffb23f", "#b48cff", "#5aa9ff"][i % 4]), i * 140);
-  CARD_AGENTS.forEach((a) => setAgent(a, "done"));
+  CARD_AGENTS.forEach((a) => setAgent(a, summary.failed ? "error" : summary.stopped ? "stopped" : "done"));
   updateLaunch();
   setTimeout(loadStatus, 1500);
 }
@@ -473,7 +709,7 @@ function onDone(e) {
 function logLine(e) {
   const box = $("#log");
   const A = AGENTS[e.agent];
-  const t = S.t0 ? ((performance.now() - S.t0) / 1000).toFixed(1) : "0.0";
+  const t = e.t != null ? (Number(e.t) / 1000).toFixed(1) : S.t0 ? ((performance.now() - S.t0) / 1000).toFixed(1) : "0.0";
   const line = el("div", e.level, `<span class="t">t+${t.padStart(5, " ")}</span> <span class="ag" style="color:${A?.color || "var(--g)"}">${(A?.name || e.agent.toUpperCase()).padEnd(6, " ")}</span> ${esc(e.text)}`);
   box.append(line);
   while (box.children.length > 60) box.firstChild.remove();
@@ -612,10 +848,11 @@ setInterval(() => { $("#clock").textContent = new Date().toLocaleTimeString("en-
 
 // ------------------------------------------------------------------ boot
 async function boot() {
+  const engine = S.status?.engines.find((entry) => entry.id === $("#engine").value);
   const lines = [
     "> init agent loop ................ ok",
     "> crew: ATLAS · SAGE · JEV · HOUND",
-    "> engine: claude code ............ " + (S.status.engines.find((e) => e.id === "claude-cli")?.ok ? "signed in" : "NOT FOUND"),
+    "> provider ....................... " + (engine ? `${engine.label}: ${engine.authStatus || (engine.ok ? "ready" : "setup needed")}` : "choose Codex or Claude"),
     "> judge core ..................... linked",
     "> loading cortex mesh ............ 94 slices",
     "> ready.",
@@ -635,11 +872,14 @@ async function boot() {
 
 (async function main() {
   buildStations(); buildAgents(); buildLanes(); initForm();
+  loadConnections();
   await loadStatus();
+  renderMcp();
   buildRing();
   new ResizeObserver(buildRing).observe($("#stage"));
   requestAnimationFrame(tick);
   await boot();
+  await restoreLastRun();
   if (params.get("autorun") === "demo" || params.get("autorun") === "live") setTimeout(launch, 300);
   if (params.get("replay")) setTimeout(() => startReplay(params.get("replay")), 300);
 })();
