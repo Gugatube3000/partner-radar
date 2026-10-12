@@ -6,6 +6,7 @@ Research financial partners worldwide using **your Codex / ChatGPT subscription 
 
 ## What changed in version 3.1
 
+- **Email candidates for named contacts:** public company examples teach observed formats, including documented parent-company mail domains. Remaining gaps get a plausible name-and-company-domain address labeled **Guess**. Blank addresses are reserved for unusable names, missing business domains or exhausted distinct candidates; the contact and Excel explain the reason.
 - **Focused control dashboard:** research setup starts directly below the header, with the agent workspace and results beside it.
 - **Visible live activity:** searchable task, search, page-read, result and issue events, with filters and a pause-follow control. Pausing keeps collecting new events.
 - **Motion tied to research:** active agents light up and the signal globe reacts to actual events. Motion rests when research ends, the page is hidden, or reduced motion is enabled.
@@ -83,7 +84,7 @@ For Codex, registration can also be done with `codex mcp add apollo --url https:
 | --- | --- |
 | Published | A public source identifies the address. Source links are retained. |
 | Inferred | Based on an evidenced company email pattern or provider finder; it is not a published address. |
-| Guess | A possible format without supporting pattern evidence; requires review. |
+| Guess | A plausible address from the researched name and company domain, without supporting pattern evidence. The assumed format is shown. |
 | Verified | Hunter returned a valid/deliverable result. |
 | Catch-all | The domain accepts arbitrary recipients; the individual mailbox remains uncertain. |
 | Unverified | Deliverability could not be confirmed. |

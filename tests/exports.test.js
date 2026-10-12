@@ -76,6 +76,18 @@ test("firm overview never attaches a different person's legacy email to its sele
   assert.equal(row.getCell("emailEvidence").value, "");
 });
 
+test("Excel and CSV retain the per-person email pattern and explain an impossible fallback", async () => {
+  const run = fixture(), people = run.firms.get("atlas").contacts;
+  people[0].emailPattern = "first";
+  people[2].emailFallbackReason = "A company business email domain is needed.";
+  const workbook = await buildWorkbook(run), contacts = workbook.getWorksheet("Contacts");
+  assert.equal(contacts.getRow(2).getCell("emailPattern").value, "first");
+  assert.equal(contacts.getRow(4).getCell("emailFallbackReason").value, people[2].emailFallbackReason);
+  const csv = buildCsv(run);
+  assert.match(csv, /"Email pattern","Email fallback reason"/);
+  assert.ok(csv.includes(people[2].emailFallbackReason));
+});
+
 test("CSV includes source-labelled phones, contact profiles and dates while protecting every field from formulas", () => {
   const run = fixture(), firm = run.firms.get("atlas");
   firm.name = "=HYPERLINK(\"https://bad.invalid\")";

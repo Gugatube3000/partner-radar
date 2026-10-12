@@ -1,6 +1,6 @@
 {
   "name": "partner-radar",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "description": "Source partner institutions in any country, score fit, find verified decision-makers, draft outreach, and export to Excel.",
   "private": true,
   "type": "module",

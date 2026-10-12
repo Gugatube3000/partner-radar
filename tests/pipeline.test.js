@@ -78,6 +78,19 @@ test("supplemental finder discovers additional distinct contacts and preserves e
   assert.equal(new Set([...run.firms.values()][0].contacts.map((c) => c.name)).size, 3);
 });
 
+test("the live pipeline fills omitted email fields before enrichment and export", async () => {
+  const run = new MemoryRun();
+  const summary = await runPipeline(run, { collectPublicPages: publicPages, checkMailDomain: mxPresent, pause: noDelay, ask: async (_engine, options) => {
+    if (options.name === "contacts") return result({ contacts: [contact("Jane Smith", "", { email_type: "none" }), contact("Alan Doe", "", { email_type: "none" })] });
+    return answers(options);
+  } });
+  assert.equal(summary.outcome, "completed");
+  const people = [...run.firms.values()][0].contacts;
+  assert.deepEqual(people.map((person) => person.email), ["jane.smith@alpha.biz", "alan.doe@alpha.biz"]);
+  assert.ok(people.every((person) => person.emailStatus === "Guess" && person.emailCheck === "mx_present"));
+  assert.ok(run.events.some((event) => event.type === "activity" && /Email candidates:/.test(event.text)));
+});
+
 test("finder follow-up failures retain initial contacts and report partial completion", async () => {
   const run = new MemoryRun();
   let finder = 0;
