@@ -1,0 +1,7 @@
+.env
+node_modules/
+runs/
+*.xlsx
+*.zip
+*.pptx
+for-the-team/

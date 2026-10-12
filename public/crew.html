@@ -1,0 +1,13 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Crew</title>
+<style>html,body{margin:0;background:transparent;font-family:Arial,sans-serif}
+.row{display:flex;gap:40px;justify-content:center;padding:10px 20px;width:1560px}
+.m{width:290px;text-align:center}.m svg{width:220px;height:220px;filter:drop-shadow(0 6px 10px rgba(0,0,0,.18))}
+.n{font-weight:800;font-size:40px;letter-spacing:4px;margin-top:4px}.r{font-size:24px;color:#5B6870;margin-top:4px}</style></head>
+<body><div class="row" id="row"></div>
+<script type="module">
+import { AGENTS } from "/mascots.js";
+const labels = { scout: "finds the firms", analyst: "reads their sites", judge: "scores the fit", finder: "finds the CEO", writer: "writes the email" };
+const dark = { scout: "#2E6FC2", analyst: "#4E8A1E", judge: "#7A4FD0", finder: "#C27A10", writer: "#9A6A00" };
+const only = new URLSearchParams(location.search).get("only");
+document.getElementById("row").innerHTML = Object.entries(AGENTS).filter(([k]) => !only || only.split(",").includes(k)).map(([k, a]) => `<div class="m">${a.svg}<div class="n" style="color:${dark[k]}">${a.name}</div><div class="r">${labels[k]}</div></div>`).join("");
+</script></body></html>

@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Partner Radar</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script type="importmap">{ "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }</script>
+</head>
+<body>
+  <div id="boot" class="boot"><div class="boot-inner"><div class="boot-title">PARTNER RADAR</div><pre id="bootlog"></pre><div class="boot-bar"><i id="bootbar"></i></div></div></div>
+
+  <div class="app">
+    <header class="hdr">
+      <div class="brand">
+        <div class="title"><span class="t1">PARTNER RADAR</span><span class="t2" id="stackLabel">AGENT CREW <em>·</em> RUNS ON CLAUDE</span></div>
+        <div class="sub">GLOBAL EQUITY PARTNERSHIPS · AGENT LOOP · <span id="engineLabel">DEMO ENGINE</span> · BUILD 2026.10</div>
+      </div>
+      <div class="hstats">
+        <div><span>FIRMS/MIN</span><b id="hFpm">0.0</b></div>
+        <div><span>IN FLIGHT</span><b id="hInf">0</b></div>
+        <div><span>MAPPED</span><b id="hFound">0</b></div>
+        <div><span>EMAILS</span><b id="hVer">0</b></div>
+        <div><span>FIT 4+</span><b id="hStrong">0</b></div>
+      </div>
+      <div class="hright"><span id="modePill" class="pill">STANDBY</span><span id="clock" class="clock">00:00:00</span></div>
+    </header>
+
+    <nav class="track">
+      <div class="track-label">LOOP · PIPELINE · <span id="loopState">IDLE</span></div>
+      <div class="stations" id="stations"></div>
+      <div class="track-right">TASKS <b id="tTasks">0</b> · ERRORS <b id="tErr">0</b> · T+<b id="tElapsed">0.0</b>s</div>
+    </nav>
+
+    <main class="grid">
+      <aside class="panel mission">
+        <div class="ph">MISSION <span class="ph-r">brief the crew</span></div>
+        <div class="mission-body">
+          <label class="fl">Target country</label>
+          <select id="country"></select>
+
+          <div class="lookfor">Looks for <b>asset managers</b> that invest in equities or fixed income. Skips real estate / private-equity-only firms and ones too small for the market.</div>
+
+          <label class="fl">How many firms <b id="firmsVal">8</b></label>
+          <input type="range" id="firms" min="3" max="30" value="8">
+
+          <label class="fl">Skip these firms <span class="hint">already contacted</span></label>
+          <textarea id="exclude" rows="2" placeholder="One per line"></textarea>
+
+          <label class="fl">Extras</label>
+          <div class="toggles"><label><input type="checkbox" id="drafts"> Also draft first emails (optional)</label></div>
+
+          <label class="fl w-only">Email template <span class="hint">{{first_name}} {{firm}} {{country}} {{language}} {{why}} {{sender}}</span></label>
+          <textarea id="template" class="w-only" rows="9"></textarea>
+
+          <div class="row2 w-only">
+            <div><label class="fl">Signed by</label><input id="sender" placeholder="Your name, title"></div>
+            <div><label class="fl">Draft if fit ≥</label><select id="minFit"><option>2</option><option selected>3</option><option>4</option></select></div>
+          </div>
+          <div class="toggles w-only">
+            <label><input type="checkbox" id="localLanguage" checked> Write in their language</label>
+            <label><input type="checkbox" id="personalize" checked> Personal first line</label>
+          </div>
+
+          <div id="modelRow"><label class="fl">Claude model</label><select id="claudeModel"><option value="sonnet">Sonnet · faster</option><option value="opus">Opus · deeper</option></select></div>
+          <div class="engine-note" id="engineNote">Runs on your Claude plan</div>
+          <select id="engine" hidden></select>
+          <div id="replayBox" class="replaybox"></div>
+        </div>
+        <div class="mission-foot">
+          <button id="launch" class="launch"><span>▶ LAUNCH</span><small id="launchSub">runs on your Claude plan</small></button>
+          <button id="stop" class="stopbtn" disabled>■</button>
+        </div>
+      </aside>
+
+      <section class="stage" id="stage">
+        <canvas id="brain"></canvas>
+        <div class="stage-grid"></div>
+        <svg id="ring" class="ring"></svg>
+        <div id="orbitLabels" class="orbit-labels"></div>
+        <div id="agents"></div>
+        <div class="core"><div class="core-k">JUDGE CORE</div><div class="core-v" id="coreModel">JEV ROUTER</div><div class="core-s" id="coreStats">0 scored · — avg</div></div>
+        <div class="ticker" id="ticker"><span class="tk-dot"></span><span id="tickerText">standing by</span></div>
+        <div class="result" id="result">RESULT · AWAITING SIGNAL</div>
+        <div class="banner" id="banner"><span>MEETING-READY</span><b id="bReady">0</b><i>/</i><b id="bTotal">0</b><small id="bannerSub">fit 4+ · email found</small></div>
+        <div class="stage-tl">CORTEX · <span id="cortexState">ASSEMBLING</span></div>
+        <div class="stage-tr" id="targetTag">TARGET · —</div>
+      </section>
+
+      <aside class="panel telemetry">
+        <div class="ph">TELEMETRY <span class="ph-r" id="telemetryMode">standby</span></div>
+        <div class="gauges"><div class="gauge" id="gThr"></div><div class="gauge" id="gLat"></div></div>
+        <div class="ph sub">FIT MAP · RADAR <span class="ph-r">center = best fit</span></div>
+        <div class="radar-wrap"><canvas id="radar"></canvas>
+          <div class="radar-legend"><span><i style="background:#2cf5b5"></i>published</span><span><i style="background:#5cd6ff"></i>inferred</span><span><i style="background:#ffb23f"></i>guess</span><span><i style="background:#ff5c70"></i>none</span></div>
+        </div>
+        <div class="ph sub">EVENT LOG</div>
+        <div id="log" class="log"></div>
+      </aside>
+
+      <section class="panel board">
+        <div class="lanes-wrap">
+          <div class="ph">TASKS <span class="ph-r" id="laneStats">0 run · 0 done · 0 err</span></div>
+          <div class="lanes" id="lanes"></div>
+        </div>
+        <div class="leads">
+          <div class="ph lb-head">LEAD BOARD
+            <span class="lb-stats"><span>FOUND <b id="lbFound">0</b></span><span>SCORED <b id="lbScored">0</b></span><span>FIT 4+ <b id="lbStrong">0</b></span><span>EMAILS <b id="lbEmails">0</b></span></span>
+            <button id="lbMax" class="lb-btn" title="Expand the board">⤢ EXPAND</button>
+            <button id="dl" class="dl" disabled>⬇ EXCEL</button>
+          </div>
+          <div class="table" id="table">
+            <div class="tr th"><span>#</span><span>FIRM</span><span>INVESTS IN</span><span>FIT</span><span>DECISION-MAKER</span><span>EMAIL</span><span></span></div>
+            <div id="rows"><div class="empty" id="lbEmpty">Ranked by fit as the crew works. Click a row for the details.</div></div>
+          </div>
+        </div>
+      </section>
+      <div id="drawer" class="drawer" hidden><div class="drawer-card" id="drawerCard"></div></div>
+    </main>
+  </div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "target": "ES2023", "module": "NodeNext", "moduleResolution": "NodeNext",
+    "checkJs": true, "allowJs": true, "noEmit": true, "strict": false, "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["server.js", "lib/**/*.js"]
+}
