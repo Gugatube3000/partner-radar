@@ -6,6 +6,8 @@ export function createBrain(canvas, { onReady } = {}) {
   const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
   let energy = .15, angle = .4, frame = 0, previous = 0, visible = true;
   const pulses = [];
+  const transfers = [], activeAgents = new Map();
+  let accent = "#b8aaff", timer = 0;
   const points = Array.from({ length: 76 }, (_, index) => {
     const y = 1 - 2 * index / 75, radius = Math.sqrt(1 - y * y), longitude = index * 2.399963;
     return { x: radius * Math.cos(longitude), y, z: radius * Math.sin(longitude) };
@@ -36,6 +38,12 @@ export function createBrain(canvas, { onReady } = {}) {
       return { x: cx + x * radius, y: cy + point.y * radius, depth: (z + 1) / 2 };
     };
     const projected = points.map(project);
+    if (moving && context.createConicGradient) {
+      context.save(); context.translate(cx, cy); context.rotate(angle * 1.7);
+      const beam = context.createConicGradient(0, 0, 0);
+      beam.addColorStop(0, "rgba(139,126,255,.12)"); beam.addColorStop(.16, "rgba(139,126,255,0)"); beam.addColorStop(1, "rgba(139,126,255,0)");
+      context.fillStyle = beam; context.beginPath(); context.arc(0, 0, radius * 1.22, 0, Math.PI * 2); context.fill(); context.restore();
+    }
     context.strokeStyle = "rgba(151,143,227,.18)"; context.lineWidth = .7;
     context.beginPath(); context.arc(cx, cy, radius, 0, Math.PI * 2); context.stroke();
     for (const [i, j] of links) {
@@ -49,14 +57,34 @@ export function createBrain(canvas, { onReady } = {}) {
       context.beginPath(); context.arc(point.x, point.y, emphasis ? 3.2 : 1.6, 0, Math.PI * 2); context.fill();
       if (emphasis && point.depth > .5) { context.strokeStyle = "rgba(187,171,255,.2)"; context.beginPath(); context.arc(point.x, point.y, 7, 0, Math.PI * 2); context.stroke(); }
     }
+    const names = ["scout", "analyst", "judge", "finder", "writer"];
+    for (const [name, color] of activeAgents) {
+      const theta = names.indexOf(name) * Math.PI * 2 / 5 - Math.PI / 2;
+      const x = cx + Math.cos(theta) * radius * 1.14, y = cy + Math.sin(theta) * radius * 1.14;
+      context.strokeStyle = color; context.lineWidth = 1.4; context.globalAlpha = .7;
+      context.beginPath(); context.moveTo(x, y); context.quadraticCurveTo(cx + Math.cos(theta + .8) * radius * .4, cy + Math.sin(theta + .8) * radius * .4, cx, cy); context.stroke();
+      context.globalAlpha = 1; context.fillStyle = color; context.shadowColor = color; context.shadowBlur = 12;
+      context.beginPath(); context.arc(x, y, 4, 0, Math.PI * 2); context.fill(); context.shadowBlur = 0;
+    }
+    for (let i = transfers.length - 1; i >= 0; i--) {
+      const transfer = transfers[i], progress = (now - transfer.start) / 1600;
+      if (progress >= 1) { transfers.splice(i, 1); continue; }
+      if (!moving) continue;
+      const theta = names.indexOf(transfer.agent) * Math.PI * 2 / 5 - Math.PI / 2;
+      const distance = radius * 1.14 * (1 - progress);
+      const x = cx + Math.cos(theta + Math.sin(progress * Math.PI) * .3) * distance, y = cy + Math.sin(theta + Math.sin(progress * Math.PI) * .3) * distance;
+      context.fillStyle = transfer.color; context.shadowColor = transfer.color; context.shadowBlur = 15;
+      context.beginPath(); context.arc(x, y, 3.5, 0, Math.PI * 2); context.fill(); context.shadowBlur = 0;
+    }
+    context.fillStyle = accent; context.globalAlpha = .65; context.beginPath(); context.arc(cx, cy, moving ? 4 + Math.sin(now / 250) : 4, 0, Math.PI * 2); context.fill(); context.globalAlpha = 1;
     for (let i = pulses.length - 1; i >= 0; i--) {
       const pulse = pulses[i], progress = (now - pulse.start) / 1000;
       if (progress > 1) { pulses.splice(i, 1); continue; }
       if (!motion.matches) { context.globalAlpha = (1 - progress) * .5; context.strokeStyle = pulse.color; context.lineWidth = 1; context.beginPath(); context.arc(cx, cy, radius * (.7 + progress * .5), 0, Math.PI * 2); context.stroke(); context.globalAlpha = 1; }
     }
-    if (moving || pulses.length && !motion.matches && !document.hidden && visible) frame = requestAnimationFrame(draw);
+    if (moving || pulses.length && !motion.matches && !document.hidden && visible) timer = setTimeout(() => { timer = 0; frame = requestAnimationFrame(draw); }, 33);
   }
-  const refresh = () => { if (!frame && !document.hidden && visible) { previous = 0; frame = requestAnimationFrame(draw); } };
+  const refresh = () => { if (!frame && !timer && !document.hidden && visible) { previous = 0; frame = requestAnimationFrame(draw); } };
   new ResizeObserver(refresh).observe(canvas);
   if (typeof IntersectionObserver !== "undefined") new IntersectionObserver((entries) => { visible = entries[0].isIntersecting; if (visible) refresh(); }).observe(canvas);
   document.addEventListener("visibilitychange", refresh);
@@ -65,6 +93,10 @@ export function createBrain(canvas, { onReady } = {}) {
   return {
     setEnergy(value) { energy = Number(value) || 0; refresh(); },
     pulse(color = "#b8aaff") { if (motion.matches || document.hidden || !visible) return; pulses.push({ start: performance.now(), color }); if (pulses.length > 5) pulses.shift(); refresh(); },
+    setAgent(name, running, color = "#b8aaff") { if (running) { activeAgents.set(name, color); accent = color; } else activeAgents.delete(name); refresh(); },
+    transfer(agent, kind) { if (motion.matches || energy <= .5 || document.hidden || !visible) return; const color = activeAgents.get(agent) || accent; transfers.push({ agent, kind, color, start: performance.now() }); if (transfers.length > 18) transfers.shift(); refresh(); },
+    reset() { activeAgents.clear(); pulses.length = 0; transfers.length = 0; accent = "#b8aaff"; refresh(); },
+    finish() { activeAgents.clear(); pulses.length = 0; transfers.length = 0; refresh(); },
     progress: () => 1,
   };
 }

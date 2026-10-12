@@ -1,5 +1,6 @@
 import { createBrain } from "/brain.js";
 import { AGENTS } from "/mascots.js";
+import { ActivityStore, activityRecord, taskState } from "/activity.js";
 import { safeHttpUrl, contactsForFirm, hasUsableEmail, hasEmailEvidence, summarizeFirms, matchesFirm, selectedEngine, estimateRange, phoneLabel, contactCoverage } from "/ui-utils.js";
 
 const $ = (s) => document.querySelector(s);
@@ -32,7 +33,9 @@ const S = {
   status: null, mode: "demo", runId: null, es: null, t0: 0, running: false, firms: new Map(), rows: new Map(),
   stats: {}, orbit: [], judged: 0, judgeMs: 0, errors: 0, tasks: 0, gauge: { thr: 0, lat: 0 }, target: { thr: 0, lat: 0 },
   laneCounts: { running: 0, done: 0 }, metrics: {}, lastSeq: 0, starting: false, integrations: [], mcp: null,
+  activeTasks: new Map(), sourceActions: 0,
 };
+const activity = new ActivityStore(180);
 
 // ------------------------------------------------------------------ brain
 let brain;
@@ -187,6 +190,13 @@ function wireCommandCopies(host) {
 }
 
 function initForm() {
+  $("#activityFilter").onchange = renderActivity;
+  $("#activitySearch").oninput = renderActivity;
+  $("#activityPause").onclick = () => { activity.follow = !activity.follow; updateActivityFollow(); renderActivity(); };
+  $("#liveActivity").addEventListener("scroll", () => {
+    const box = $("#liveActivity");
+    if (activity.follow && box.scrollHeight - box.scrollTop - box.clientHeight > 50) { activity.follow = false; updateActivityFollow(); }
+  }, { passive: true });
   chipGroup("#types", TYPES, ["Asset managers"], "types");
   chipGroup("#roles", ROLES, ["CEO", "CIO", "Head of Partnerships", "Head of Distribution"], "roles");
   $("#countrySearch").oninput = () => renderCountries($("#country").value || store.get("country", "BR"));
@@ -394,6 +404,9 @@ function renderMcp() {
 
 // ------------------------------------------------------------------ run lifecycle
 function resetRunUI() {
+  activity.clear(); S.activeTasks.clear(); S.sourceActions = 0; updateActivityFollow(); renderActivity();
+  $("#activeAgentCount").textContent = "0"; $("#sourceActionCount").textContent = "0";
+  brain.reset?.();
   S.firms.clear(); S.rows.clear(); S.orbit = []; S.judged = 0; S.judgeMs = 0; S.errors = 0; S.tasks = 0;
   S.laneCounts = { running: 0, done: 0 }; S.target = { thr: 0, lat: 0 }; S.metrics = {}; S.lastSeq = 0;
   $("#rows").innerHTML = '<div class="empty" id="lbEmpty">Ranked by fit as the crew works. Click a row for the details.</div>'; $("#log").innerHTML = "";
@@ -442,6 +455,7 @@ function connect(id, startedAt = Date.now()) {
   S.es?.close();
   resetRunUI();
   S.runId = id; S.t0 = performance.now() - Math.max(0, Date.now() - startedAt); S.running = true;
+  document.body.classList.add("research-running"); $("#cortexState").textContent = "Researching";
   store.set("lastRun", id);
   $("#stop").disabled = false;
   $(".track").classList.add("running");
@@ -472,6 +486,7 @@ function connect(id, startedAt = Date.now()) {
       const response = await fetch(`/api/runs/${encodeURIComponent(id)}`);
       if (response.status === 404 && S.es === es) {
         es.close(); S.running = false; $("#stop").disabled = true; $(".track").classList.remove("running");
+        finishMotion("unavailable");
         $("#loopState").textContent = "Unavailable";
         showFormMessage("This run is no longer available on the server. Start a new run or replay a saved one."); updateLaunch();
       }
@@ -490,6 +505,9 @@ async function restoreLastRun() {
 
 function handle(e) {
   if (NOWRITER && (e.agent === "writer" || (e.type === "stage" && e.stage === "writer"))) return;
+  const firm = S.firms.get(e.firmId);
+  const record = activityRecord(e, firm?.name || "");
+  if (activity.add(record)) { renderActivity(); if (["search", "read"].includes(record.kind)) { S.sourceActions++; $("#sourceActionCount").textContent = S.sourceActions; } }
   switch (e.type) {
     case "run": {
       const pill = $("#modePill");
@@ -497,8 +515,8 @@ function handle(e) {
       pill.textContent = e.mode === "demo" ? "Fictional demo" : e.mode === "replay" ? `Saved run · ${e.speed}×` : `Live research · ${e.engine === "codex-cli" ? "Codex" : e.engine === "claude-cli" ? "Claude" : "API"}`;
       const eng = S.status?.engines.find((x) => x.id === e.engine);
       $("#engineLabel").textContent = e.mode === "demo" ? "DEMO ENGINE" : (eng?.label || e.engine).toUpperCase();
-      $("#coreModel").textContent = e.mode === "demo" ? "Explore the research flow" : e.engine === "codex-cli" ? "Powered by Codex" : e.engine === "claude-cli" ? "Powered by Claude" : String(e.judge || "AI research team");
-      $("#stackLabel").textContent = e.mode === "demo" ? "Explore with fictional data" : e.engine === "codex-cli" ? "Your Codex research team" : e.engine === "claude-cli" ? "Your Claude research team" : String(eng?.label || e.engine);
+      $("#coreModel").textContent = e.mode === "demo" ? "Demo engine" : e.engine === "codex-cli" ? "Codex" : e.engine === "claude-cli" ? "Claude" : String(e.judge || "AI research team");
+      $("#stackLabel").textContent = e.mode === "demo" ? "Fictional demo" : e.engine === "codex-cli" ? "Codex research team" : e.engine === "claude-cli" ? "Claude research team" : String(eng?.label || e.engine);
       S.mode = e.mode;
       S.runCountry = e.country;
       S.requestedFirms = Number(e.config.firms);
@@ -514,7 +532,7 @@ function handle(e) {
     case "stage": setStation(e.stage, e.state); break;
     case "agent": setAgent(e.agent, e.status); break;
     case "task": onTask(e); break;
-    case "firm": addFirm(e.firm); break;
+    case "firm": addFirm(e.firm); brain.transfer?.("scout", "result"); break;
     case "firm_update": updateFirm(e.id, e.patch); break;
     case "judge": {
       const f = S.firms.get(e.firmId);
@@ -532,11 +550,13 @@ function handle(e) {
 }
 
 function setAgent(a, status) {
+  brain.setAgent?.(a, status === "running", AGENTS[a]?.color);
   const card = document.querySelector(`.agent[data-agent="${a}"]`);
   if (card) {
     card.classList.toggle("running", status === "running");
     card.classList.toggle("done", status === "done");
-    card.querySelector(".astat").textContent = ({ running: "Working", done: "Done", error: "Issue", stopped: "Stopped", idle: "Ready" })[status] || status;
+    card.classList.toggle("error", status === "error"); card.classList.toggle("stopped", status === "stopped");
+    card.querySelector(".astat").textContent = ({ running: "Working", done: "Done", error: "Issue", stopped: "Stopped", idle: "Ready", waiting: "Waiting" })[status] || status;
   }
   const link = document.querySelector(`#ring .link[data-agent="${a}"]`);
   if (link) {
@@ -549,6 +569,8 @@ function onTask(e) {
   const a = e.agent in AGENTS ? e.agent : "judge";
   const st = S.stats[a] || (S.stats[a] = { done: 0, inflight: 0, ms: 0, bars: [], lines: [] });
   const lane = document.querySelector(`.lane[data-agent="${a}"]`);
+  S.activeTasks = taskState(S.activeTasks, e);
+  $("#activeAgentCount").textContent = new Set([...S.activeTasks.values()].map((task) => task.agent)).size;
   if (e.state === "running") {
     st.inflight++;
     S.laneCounts.running++;
@@ -561,6 +583,8 @@ function onTask(e) {
       while (lc.children.length > 9) lc.lastChild.remove();
     }
     if (CARD_AGENTS.includes(a)) setAgent(a, "running");
+    st.lines.unshift(esc(e.label)); st.lines = st.lines.slice(0, 3);
+    brain.transfer?.(a, "task");
   } else {
     st.inflight = Math.max(0, st.inflight - 1);
     S.laneCounts.running = Math.max(0, S.laneCounts.running - 1);
@@ -587,6 +611,7 @@ function onTask(e) {
   }
   $("#laneStats").textContent = `${S.laneCounts.running} active · ${S.laneCounts.done} done · ${S.errors} issues`;
   if (CARD_AGENTS.includes(a)) renderCard(a);
+  if (e.state !== "running" && CARD_AGENTS.includes(a) && !st.inflight) setAgent(a, e.state === "error" ? "error" : "waiting");
 }
 
 let tickerIdle = null;
@@ -611,6 +636,7 @@ function onActivity(e) {
     if (CARD_AGENTS.includes(a)) renderCard(a);
   }
   if (/^search|^read/.test(e.text)) brain.pulse(AGENTS[a]?.color || "#2cf5b5");
+  brain.transfer?.(a, /^search/i.test(e.text) ? "search" : /^read/i.test(e.text) ? "read" : "activity");
   clearTimeout(tickerIdle);
   tickerIdle = setTimeout(() => { if (S.running) setTicker(a, "thinking…"); }, 6000);
 }
@@ -774,6 +800,7 @@ function onDone(e) {
   const summary = e.summary || e;
   const partial = summary.partial && !summary.stopped && !summary.failed || summary.outcome === "partial" || summary.state === "partial";
   S.running = false;
+  finishMotion(summary.failed ? "failed" : summary.stopped ? "stopped" : "complete");
   S.es?.close();
   clearTimeout(tickerIdle);
   const totals = summarizeFirms([...S.firms.values()]);
@@ -796,12 +823,42 @@ function onDone(e) {
   $("#dlCsv").disabled = false;
   $("#banner").classList.toggle("win", !summary.failed && !summary.stopped && !partial);
   brain.setEnergy(0.35);
-  brain.pulse("#b9a9ff");
-  CARD_AGENTS.forEach((a) => setAgent(a, summary.failed ? "error" : summary.stopped ? "stopped" : "done"));
+  CARD_AGENTS.forEach((a) => setAgent(a, summary.failed ? "error" : summary.stopped ? "stopped" : S.stats[a]?.done ? "done" : "idle"));
   updateLaunch();
   setTimeout(loadStatus, 1500);
 }
 
+function updateActivityFollow() {
+  $("#activityPause").textContent = activity.follow ? "Pause follow" : "Follow latest";
+  $("#activityPause").setAttribute("aria-pressed", String(!activity.follow));
+}
+function renderActivity() {
+  const box = $("#liveActivity"), previousTop = box.scrollTop;
+  const records = activity.filtered($("#activityFilter").value, $("#activitySearch").value);
+  $("#activityCount").textContent = `${activity.total} events`;
+  box.innerHTML = records.length ? records.map((record) => {
+    const name = AGENT_LABELS[record.agent]?.[0] || "System";
+    const color = AGENTS[record.agent]?.color || "#b8aaff";
+    const icon = { search: "⌕", read: "↗", result: "✓", issue: "!", task: "◈", progress: "·" }[record.kind];
+    const stamp = `${Math.floor(record.t / 60000).toString().padStart(2, "0")}:${Math.floor(record.t / 1000 % 60).toString().padStart(2, "0")}`;
+    const status = record.status === "running" ? "Started" : record.status === "done" ? "Done" : ["error", "err"].includes(record.status) ? "Issue" : record.status === "stopped" ? "Stopped" : "";
+    return `<div class="activity-entry kind-${record.kind}"><span class="activity-icon" style="--event-color:${color}">${icon}</span><div><div class="event-meta"><b style="color:${color}">${name}</b><time>${stamp}</time>${status ? `<span>${status}</span>` : ""}</div><div class="event-text">${esc(record.text)}</div>${record.firm && !record.text.includes(record.firm) ? `<div class="event-firm">${esc(record.firm)}</div>` : ""}${record.url ? `<a href="${esc(record.url)}" target="_blank" rel="noopener noreferrer">Open source ↗</a>` : ""}</div></div>`;
+  }).join("") : `<div class="activity-empty">${activity.total ? "No events match these filters." : "Searches, page reads and results will appear here."}</div>`;
+  box.scrollTop = activity.follow ? box.scrollHeight : previousTop;
+}
+function finishMotion(state) {
+  document.body.classList.remove("research-running");
+  S.activeTasks.clear(); S.laneCounts.running = 0;
+  $("#activeAgentCount").textContent = "0"; $("#hInf").textContent = "0";
+  $("#cortexState").textContent = state === "complete" ? "Complete" : state === "stopped" ? "Stopped" : "Attention";
+  for (const agent of CARD_AGENTS) {
+    if (S.stats[agent]) S.stats[agent].inflight = 0;
+    brain.setAgent?.(agent, false, AGENTS[agent].color); renderCard(agent);
+  }
+  document.querySelectorAll(".tk.running").forEach((token) => { token.classList.remove("running"); token.classList.add("error"); });
+  $("#laneStats").textContent = `0 active · ${S.laneCounts.done} done · ${S.errors} issues`;
+  brain.setEnergy(0.15); brain.finish?.();
+}
 function logLine(e) {
   const box = $("#log");
   const A = AGENTS[e.agent];

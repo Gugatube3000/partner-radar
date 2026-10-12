@@ -2,7 +2,14 @@
 
 Research financial partners worldwide using **your Codex / ChatGPT subscription or your Claude subscription**. Choose the provider in the dashboard; your choice is remembered. Research consumes that plan's normal limits. Optional contact-data services use their own keys and credits.
 
-![Partner Radar dashboard](screenshot.png)
+![Partner Radar dashboard](screenshot.jpg)
+
+## What changed in version 3.1
+
+- **Focused control dashboard:** research setup starts directly below the header, with the agent workspace and results beside it.
+- **Visible live activity:** searchable task, search, page-read, result and issue events, with filters and a pause-follow control. Pausing keeps collecting new events.
+- **Motion tied to research:** active agents light up and the signal globe reacts to actual events. Motion rests when research ends, the page is hidden, or reduced motion is enabled.
+- **Responsive cancellation:** stopping a fictional demo interrupts its current delay immediately and preserves partial results.
 
 ## What changed in version 3
 
