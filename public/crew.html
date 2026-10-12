@@ -6,7 +6,7 @@
 <body><div class="row" id="row"></div>
 <script type="module">
 import { AGENTS } from "/mascots.js";
-const labels = { scout: "finds the firms", analyst: "reads their sites", judge: "scores the fit", finder: "finds the CEO", writer: "writes the email" };
+const labels = { scout: "finds the firms", analyst: "reads their sites", judge: "scores the fit", finder: "finds decision-makers", writer: "writes the email" };
 const dark = { scout: "#2E6FC2", analyst: "#4E8A1E", judge: "#7A4FD0", finder: "#C27A10", writer: "#9A6A00" };
 const only = new URLSearchParams(location.search).get("only");
 document.getElementById("row").innerHTML = Object.entries(AGENTS).filter(([k]) => !only || only.split(",").includes(k)).map(([k, a]) => `<div class="m">${a.svg}<div class="n" style="color:${dark[k]}">${a.name}</div><div class="r">${labels[k]}</div></div>`).join("");

@@ -1,4 +1,4 @@
-PARTNER RADAR 2
+PARTNER RADAR 3
 ===============
 Choose your Codex / ChatGPT subscription or your Claude subscription in the dashboard.
 Research uses your normal subscription allowance. Optional data-service credits are separate.
@@ -17,9 +17,14 @@ Open http://localhost:4747 and keep the terminal open.
 USE
 ---
 Select a provider, country with flag, institution types and roles.
+Use "Want more specific research?" to describe your ideal partner and priorities.
 Choose 3-100 firms and 1-8 contacts per firm; start small.
+Review the approximate time range before launching; it updates from work completed.
 Balanced/deep controls research coverage. Inspect contact evidence before outreach.
-Excel includes a separate Contacts sheet. CSV exports each person.
+Agents follow up on specific missing email, person-profile and current-role evidence.
+Excel includes a separate Contacts sheet with individual LinkedIn links and sourced
+business phones where available. Shared company lines are labeled separately.
+CSV exports each person. The coverage summary explains missing data and next steps.
 Demo data is fictional. Saved partial/live results reopen after restart.
 
 CONNECTIONS

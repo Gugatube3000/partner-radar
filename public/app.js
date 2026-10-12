@@ -1,6 +1,6 @@
 import { createBrain } from "/brain.js";
 import { AGENTS } from "/mascots.js";
-import { safeHttpUrl, contactsForFirm, hasUsableEmail, hasEmailEvidence, summarizeFirms, matchesFirm, selectedEngine } from "/ui-utils.js";
+import { safeHttpUrl, contactsForFirm, hasUsableEmail, hasEmailEvidence, summarizeFirms, matchesFirm, selectedEngine, estimateRange, phoneLabel, contactCoverage } from "/ui-utils.js";
 
 const $ = (s) => document.querySelector(s);
 const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
@@ -11,12 +11,14 @@ let NOWRITER = true;
 function setWriter(on) { NOWRITER = !on; document.body.classList.toggle("nowriter", !on); }
 const store = { get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
 
-const STATIONS = [["brief", "BRIEF"], ["scout", "SCOUT"], ["analyst", "ANALYST"], ["judge", "JUDGE"], ["finder", "FINDER"], ["verify", "VERIFY"], ["writer", "WRITER"], ["excel", "EXCEL"]];
+const STATIONS = [["brief", "Plan"], ["scout", "Discover"], ["analyst", "Investigate"], ["judge", "Score"], ["finder", "Contacts"], ["verify", "Verify"], ["writer", "Draft"], ["excel", "Export"]];
 const TYPES = ["Asset managers", "Wealth managers", "Private banks", "Brokerages", "Digital investment platforms", "Insurers", "Family offices"];
 const SEGMENTS = ["Retail", "Affluent", "HNW"];
 const ROLES = ["CEO", "CIO", "Head of Partnerships", "Head of Distribution", "Head of Wealth", "Head of Investments", "Business Development"];
-const CARD_AGENTS = ["scout", "analyst", "finder", "writer"];
+const CARD_AGENTS = ["scout", "analyst", "judge", "finder", "writer"];
 const LANE_AGENTS = ["scout", "analyst", "judge", "finder", "writer"];
+const AGENT_LABELS = { scout: ["Atlas", "Market discovery"], analyst: ["Sage", "Investment evidence"], judge: ["Jev", "Partnership fit"], finder: ["Hound", "People & contact evidence"], writer: ["Quill", "Personal outreach drafts"] };
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const DEFAULT_TEMPLATE = `Hi {{first_name}},
 
 {{firm}} serves investors who want to diversify beyond {{country}}. We have a global equity solution and client education materials we can adapt for your clients, in {{language}}.
@@ -34,8 +36,8 @@ const S = {
 
 // ------------------------------------------------------------------ brain
 let brain;
-try { brain = createBrain($("#brain"), { onReady: () => { $("#cortexState").textContent = "ONLINE"; } }); }
-catch { brain = { setEnergy() {}, pulse() {}, progress: () => 1 }; $("#cortexState").textContent = "2D MODE"; }
+try { brain = createBrain($("#brain"), { onReady: () => { $("#cortexState").textContent = "Ready"; } }); }
+catch { brain = { setEnergy() {}, pulse() {}, progress: () => 1 }; $("#cortexState").textContent = "Ready"; }
 brain.setEnergy(0.15);
 
 // ------------------------------------------------------------------ static UI
@@ -60,9 +62,9 @@ function buildAgents() {
     const card = el("div", `agent a-${a}`);
     card.style.setProperty("--c", A.color);
     card.dataset.agent = a;
-    card.innerHTML = `<div class="ahead"><div class="avatar">${A.svg}</div><div><div class="aname">${A.name}</div><div class="arole">${A.role}</div></div><span class="astat">IDLE</span></div>
-      <div class="abody"><div class="spark">${"<i></i>".repeat(14)}</div><div class="alines"><div class="mute">awaiting brief</div></div></div>
-      <div class="afoot"><span>DONE <b class="fd">0</b></span><span>IN <b class="fi">0</b></span><span>AVG <b class="fa">—</b></span><span>UTIL <b class="fu">0%</b></span></div>`;
+    card.innerHTML = `<div class="ahead"><div class="avatar" aria-hidden="true">${A.svg}</div><div><div class="aname">${AGENT_LABELS[a][0]}</div><div class="arole">${AGENT_LABELS[a][1]}</div></div><span class="astat">Ready</span></div>
+      <div class="abody"><div class="spark">${"<i></i>".repeat(14)}</div><div class="alines"><div class="mute">Waiting for your direction</div></div></div>
+      <div class="afoot"><span>Completed <b class="fd">0</b></span><span>Active <b class="fi">0</b></span><span>Average <b class="fa">—</b></span><span>Utilization <b class="fu">0%</b></span></div>`;
     box.append(card);
     S.stats[a] = { done: 0, inflight: 0, ms: 0, bars: Array(14).fill(2), lines: [] };
   }
@@ -72,7 +74,7 @@ function buildLanes() {
   const box = $("#lanes");
   box.innerHTML = "";
   for (const a of LANE_AGENTS) {
-    const lane = el("div", "lane", `<span class="ln">${AGENTS[a].name}</span><div class="lc"></div><span class="ld">0</span>`);
+    const lane = el("div", "lane", `<span class="ln">${AGENT_LABELS[a][0]}</span><div class="lc"></div><span class="ld">0</span>`);
     lane.style.setProperty("--c", AGENTS[a].color);
     lane.dataset.agent = a;
     box.append(lane);
@@ -87,7 +89,7 @@ function chipGroup(id, options, selected, key) {
     const c = el("button", `chip${on.has(o) ? " on" : ""}`, esc(o));
     c.type = "button";
     c.setAttribute("aria-pressed", String(on.has(o)));
-    c.onclick = () => { c.classList.toggle("on"); c.setAttribute("aria-pressed", String(c.classList.contains("on"))); store.set(key, values(id).join("|")); };
+    c.onclick = () => { c.classList.toggle("on"); c.setAttribute("aria-pressed", String(c.classList.contains("on"))); store.set(key, values(id).join("|")); updateBriefFeedback(); scheduleEstimate(); };
     box.append(c);
   }
 }
@@ -119,7 +121,7 @@ async function loadStatus() {
   rb.innerHTML = "";
   if (st.replays?.length) {
     const r = st.replays[0];
-    const btn = el("button", "", `⟲ REPLAY LAST LIVE RUN · ${esc(r.country)} · 4×`);
+    const btn = el("button", "", `Review last saved run · ${esc(r.country)}`);
     btn.type = "button";
     btn.onclick = () => startReplay(r.id);
     rb.append(btn);
@@ -152,13 +154,13 @@ function renderCountries(selected) {
     sel.append(og);
   }
   sel.value = current?.code || matches[0]?.code || "";
-  $("#countryCount").textContent = query ? `${matches.length} matches · ${countries.length} countries & territories available` : `${countries.length} countries & territories · flags included`;
+  $("#countryCount").textContent = query ? `${matches.length} ${matches.length === 1 ? "match" : "matches"} · ${countries.length} countries & territories available` : `${countries.length} countries & territories · flags included`;
 }
 
 function updateTargetTag() {
   if (S.runId && S.runCountry) return;
   const c = S.status?.countries.find((x) => x.code === $("#country").value);
-  if (c) $("#targetTag").innerHTML = `TARGET · <b>${c.flag} ${esc(c.name.toUpperCase())}</b><br>${esc(c.language.toUpperCase())}`;
+  if (c) $("#targetTag").innerHTML = `<b>${c.flag} ${esc(c.name)}</b><br>${esc(c.language)} sources`;
 }
 function updateLaunch() {
   const btn = $("#launch");
@@ -173,6 +175,7 @@ function updateLaunch() {
   btn.disabled = S.running || S.starting || (!demo && !eng?.ok) || !$("#country").value;
   $("#providerInstructions").innerHTML = eng ? `${eng.setup?.install ? `<div class="field-help">Install</div>${commandLine(eng.setup.install)}` : ""}${eng.setup?.login ? `<div class="field-help">Sign in with your subscription</div>${commandLine(eng.setup.login)}` : ""}${eng.authStatus ? `<div class="field-help">Status: ${esc(eng.authStatus)}. Refresh after signing in.</div>` : ""}` : '<div class="field-help">Select a provider to see its installation and sign-in steps.</div>';
   wireCommandCopies($("#providerInstructions"));
+  scheduleEstimate();
 }
 
 function commandLine(command) {
@@ -192,10 +195,27 @@ function initForm() {
   $("#refreshStatus").onclick = async () => { await loadStatus(); await loadConnections(); };
   $("#runMode").value = params.has("demo") || params.get("autorun") === "demo" ? "demo" : store.get("runMode", "live");
   $("#runMode").onchange = () => { store.set("runMode", $("#runMode").value); updateLaunch(); };
-  for (const id of ["contactsPerFirm", "researchDepth", "exclude"]) {
+  for (const id of ["contactsPerFirm", "researchDepth", "exclude", "researchBrief"]) {
     const input = $(`#${id}`); input.value = store.get(id, input.value);
-    input.onchange = () => store.set(id, input.value);
+    input.oninput = () => { store.set(id, input.value); updateBriefFeedback(); scheduleEstimate(); };
   }
+  $("#researchBrief").value = $("#researchBrief").value.slice(0, 2000);
+  $("#researchBrief").maxLength = 2000;
+  const briefPresets = {
+    "Wealth partnerships": { types: ["Wealth managers"], roles: ["Head of Partnerships", "Head of Distribution", "Head of Wealth"] },
+    "Digital platforms": { types: ["Digital investment platforms"], roles: ["Business Development", "Head of Partnerships", "CEO"] },
+    "Institutional investors": { types: ["Asset managers", "Family offices"], roles: ["CIO", "Head of Investments"] },
+  };
+  document.querySelectorAll("[data-brief]").forEach((button) => { button.onclick = () => {
+    const input = $("#researchBrief"); input.value = button.dataset.brief; store.set("researchBrief", input.value);
+    const preset = briefPresets[button.textContent];
+    if (preset) for (const key of ["types", "roles"]) {
+      document.querySelectorAll(`#${key} .chip`).forEach((chip) => { const on = preset[key].includes(chip.textContent); chip.classList.toggle("on", on); chip.setAttribute("aria-pressed", String(on)); });
+      store.set(key, values(`#${key}`).join("|"));
+    }
+    input.focus(); updateBriefFeedback(); scheduleEstimate();
+  }; });
+  updateBriefFeedback();
   for (const id of ["leadSearch", "emailFilter", "fitFilter"]) $(`#${id}`).oninput = filterBoard;
   $("#template").value = store.get("template", DEFAULT_TEMPLATE);
   $("#template").oninput = () => store.set("template", $("#template").value);
@@ -204,13 +224,15 @@ function initForm() {
   const firms = $("#firms");
   firms.value = params.get("firms") || store.get("firms", "8");
   $("#firmsVal").textContent = firms.value;
-  firms.oninput = () => { $("#firmsVal").textContent = firms.value; store.set("firms", firms.value); };
+  firms.oninput = () => { $("#firmsVal").textContent = firms.value; store.set("firms", firms.value); scheduleEstimate(); };
   const dr = $("#drafts");
   dr.checked = !params.has("nowriter") && store.get("drafts", "0") === "1";
   setWriter(dr.checked);
-  dr.onchange = () => { store.set("drafts", dr.checked ? "1" : "0"); setWriter(dr.checked); };
+  dr.onchange = () => { store.set("drafts", dr.checked ? "1" : "0"); setWriter(dr.checked); scheduleEstimate(); };
   $("#claudeModel").value = store.get("claudeModel", "sonnet");
-  $("#claudeModel").onchange = () => store.set("claudeModel", $("#claudeModel").value);
+  $("#claudeModel").onchange = () => { store.set("claudeModel", $("#claudeModel").value); scheduleEstimate(); };
+  $("#useIntegrations").checked = store.get("useIntegrations", "1") === "1";
+  $("#useIntegrations").onchange = () => { store.set("useIntegrations", $("#useIntegrations").checked ? "1" : "0"); scheduleEstimate(); };
   $("#launch").onclick = launch;
   $("#stop").onclick = async () => {
     if (!S.runId) return;
@@ -218,7 +240,7 @@ function initForm() {
     try { const response = await fetch(`/api/runs/${encodeURIComponent(S.runId)}/stop`, { method: "POST" }); if (!response.ok) throw new Error("Could not stop this run. Check the server connection."); }
     catch (error) { showFormMessage(error.message); $("#stop").disabled = !S.running; }
   };
-  $("#lbMax").onclick = () => { const on = document.body.classList.toggle("board-max"); $("#lbMax").textContent = on ? "⤡ BACK" : "⤢ EXPAND"; if (!on) setTimeout(buildRing, 50); };
+  $("#lbMax").onclick = () => { const on = document.body.classList.toggle("board-max"); $("#lbMax").textContent = on ? "Back to research" : "Focus results"; $("#lbMax").setAttribute("aria-pressed", String(on)); if (!on) setTimeout(buildRing, 50); $("#resultsHeading").scrollIntoView({ block: "start" }); };
   $("#drawer").onclick = (e) => { if (e.target === $("#drawer")) closeDrawer(); };
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") closeDrawer();
@@ -232,9 +254,70 @@ function initForm() {
   });
   $("#dl").onclick = () => { if (S.runId && $("#dl").classList.contains("ready")) location.href = `/api/runs/${S.runId}/excel`; };
   $("#dlCsv").onclick = () => { if (S.runId && !$("#dlCsv").disabled) location.href = `/api/runs/${encodeURIComponent(S.runId)}/csv`; };
+  scheduleEstimate();
 }
 
 function showFormMessage(message = "") { $("#formMessage").textContent = message; $("#formMessage").hidden = !message; }
+
+function updateBriefFeedback() {
+  const length = $("#researchBrief").value.trim().length;
+  $("#briefFeedback").textContent = length ? `Your brief will guide every research stage. ${length.toLocaleString()} / 2,000 characters.` : "The team will research investment firms and partnership decision-makers.";
+  $("#targetingSummary").textContent = `Searching: ${values("#types").join(", ") || "Choose at least one firm type"}. ${values("#roles").length} target roles selected.`;
+}
+
+function researchConfig() {
+  return {
+    mode: $("#runMode").value, engine: $("#engine").value, country: $("#country").value,
+    types: values("#types"), segments: [], roles: values("#roles"),
+    minAum: "auto", firms: Number($("#firms").value), minFit: Number($("#minFit").value),
+    contactsPerFirm: Number($("#contactsPerFirm").value), researchDepth: $("#researchDepth").value,
+    researchBrief: $("#researchBrief").value.trim(),
+    exclude: $("#exclude").value, template: $("#template").value, sender: $("#sender").value,
+    localLanguage: $("#localLanguage").checked, personalize: $("#personalize").checked,
+    speed: Number(params.get("speed")) || 1,
+    drafts: $("#drafts").checked, claudeModel: $("#claudeModel").value,
+    useIntegrations: $("#useIntegrations").checked,
+  };
+}
+
+let estimateTimer = null, estimateController = null;
+function scheduleEstimate() {
+  clearTimeout(estimateTimer);
+  estimateTimer = setTimeout(updateEstimate, 220);
+}
+async function updateEstimate() {
+  estimateController?.abort();
+  const controller = new AbortController(); estimateController = controller;
+  try {
+    const response = await fetch("/api/estimate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(researchConfig()), signal: controller.signal });
+    if (!response.ok) throw new Error("Estimate unavailable");
+    const estimate = await response.json();
+    if (controller.signal.aborted) return;
+    $("#estimateValue").textContent = estimate.label || estimateRange(estimate.lowMinutes, estimate.highMinutes);
+    $("#estimateBasis").textContent = `${estimate.basis || "Based on your research scope."} Actual time may vary.`;
+  } catch (error) {
+    if (error.name === "AbortError") return;
+    $("#estimateValue").textContent = "Estimate unavailable";
+    $("#estimateBasis").textContent = "You can still start research. Recheck your local server connection for a time estimate.";
+  }
+}
+
+function showResearchPlan(event) {
+  const plan = event.plan || event;
+  const steps = Array.isArray(plan.steps) ? plan.steps : [];
+  $("#researchPlan").hidden = !steps.length;
+  $("#planSummary").textContent = plan.brief ? "Your specific brief guides discovery, partnership scoring, and contact research." : "The team checks investment focus, evaluates partnership fit, then researches people and contact evidence.";
+  $("#planDetail").innerHTML = `${plan.brief ? `<p>${esc(plan.brief)}</p>` : ""}<ul>${steps.map((step) => `<li><strong>${esc(step.title || AGENT_LABELS[step.agent]?.[1] || "Research")}</strong>${step.detail ? `: ${esc(step.detail)}` : ""}</li>`).join("")}</ul>`;
+}
+
+function updateProgress(metrics = {}) {
+  const total = Number(metrics.totalFirms || S.requestedFirms || 0), completed = Number(metrics.completedFirms || 0);
+  const percent = Math.max(0, Math.min(100, Number(metrics.progressPercent || 0)));
+  $("#researchProgress").style.width = `${percent}%`;
+  $("#progressHeading").textContent = completed ? `${completed} of ${total} firms researched` : S.firms.size ? "Investigating your shortlist" : "Discovering firms in your market";
+  $("#progressDetail").textContent = completed ? "Results arrive as each firm is researched. Review contact evidence in the shortlist below." : "Searching relevant sources, checking investment focus, and identifying decision-makers.";
+  $("#liveEta").textContent = S.mode === "demo" ? "Fictional demo in progress" : S.mode === "replay" ? "Reviewing a saved run" : Number.isFinite(Number(metrics.etaHighMinutes)) ? `${estimateRange(metrics.etaLowMinutes, metrics.etaHighMinutes)} remaining · approx.` : "Estimating remaining time…";
+}
 
 async function loadConnections() {
   try {
@@ -324,23 +407,16 @@ function resetRunUI() {
   $("#filterEmpty").hidden = true;
   $("#banner").classList.remove("win");
   for (const id of ["#hFpm", "#hInf", "#hFound", "#hVer", "#hStrong", "#tTasks", "#tErr", "#bReady", "#bTotal"]) $(id).textContent = "0";
-  $("#result").textContent = "RESULT · AWAITING SIGNAL";
+  $("#result").textContent = "Waiting for research evidence";
+  $("#researchProgress").style.width = "0%";
+  $("#researchPlan").hidden = true;
 }
 
 async function launch() {
   if (S.running || S.starting) return;
   showFormMessage();
   if (!values("#types").length || !values("#roles").length) { showFormMessage("Select at least one firm type and decision-maker role."); return; }
-  const body = {
-    mode: $("#runMode").value, engine: $("#engine").value, country: $("#country").value,
-    types: values("#types"), segments: [], roles: values("#roles"),
-    minAum: "auto", firms: Number($("#firms").value), minFit: Number($("#minFit").value),
-    contactsPerFirm: Number($("#contactsPerFirm").value), researchDepth: $("#researchDepth").value,
-    exclude: $("#exclude").value, template: $("#template").value, sender: $("#sender").value,
-    localLanguage: $("#localLanguage").checked, personalize: $("#personalize").checked,
-    speed: Number(params.get("speed")) || 1,
-    drafts: $("#drafts").checked, claudeModel: $("#claudeModel").value,
-  };
+  const body = researchConfig();
   S.starting = true; updateLaunch();
   try {
     const res = await fetch("/api/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -369,10 +445,13 @@ function connect(id, startedAt = Date.now()) {
   store.set("lastRun", id);
   $("#stop").disabled = false;
   $(".track").classList.add("running");
-  $("#loopState").textContent = "RUNNING";
+  $("#loopState").textContent = "Researching";
   updateLaunch();
   brain.setEnergy(1);
   setTicker("scout", "starting up…");
+  $("#progressHeading").textContent = "Starting your research";
+  $("#progressDetail").textContent = "Your research team is preparing its approach and checking source coverage.";
+  $("#liveEta").textContent = "Estimating remaining time…";
   const es = new EventSource(`/api/runs/${encodeURIComponent(id)}/events`);
   S.es = es;
   es.onmessage = (message) => {
@@ -384,16 +463,16 @@ function connect(id, startedAt = Date.now()) {
       handle(event);
     } catch (error) { logLine({ level: "err", agent: "pipeline", text: `Could not display a progress event: ${error.message}` }); }
   };
-  es.onopen = () => { if (S.running) { $("#loopState").textContent = "RUNNING"; showFormMessage(); } };
+  es.onopen = () => { if (S.running) { $("#loopState").textContent = "Researching"; showFormMessage(); } };
   es.onerror = async () => {
     if (!S.running || S.es !== es) return;
-    $("#loopState").textContent = "RECONNECTING";
+    $("#loopState").textContent = "Reconnecting";
     showFormMessage("Connection interrupted. Reconnecting to your research…");
     try {
       const response = await fetch(`/api/runs/${encodeURIComponent(id)}`);
       if (response.status === 404 && S.es === es) {
         es.close(); S.running = false; $("#stop").disabled = true; $(".track").classList.remove("running");
-        $("#loopState").textContent = "UNAVAILABLE";
+        $("#loopState").textContent = "Unavailable";
         showFormMessage("This run is no longer available on the server. Start a new run or replay a saved one."); updateLaunch();
       }
     } catch { /* EventSource continues retrying while the server is offline. */ }
@@ -415,20 +494,23 @@ function handle(e) {
     case "run": {
       const pill = $("#modePill");
       pill.className = `pill ${e.mode}`;
-      pill.textContent = e.mode === "demo" ? "DEMO · FICTIONAL DATA" : e.mode === "replay" ? `REPLAY · ${e.speed}×` : `LIVE · ${e.engine === "codex-cli" ? "CODEX" : e.engine === "claude-cli" ? "CLAUDE" : "API"}`;
+      pill.textContent = e.mode === "demo" ? "Fictional demo" : e.mode === "replay" ? `Saved run · ${e.speed}×` : `Live research · ${e.engine === "codex-cli" ? "Codex" : e.engine === "claude-cli" ? "Claude" : "API"}`;
       const eng = S.status?.engines.find((x) => x.id === e.engine);
       $("#engineLabel").textContent = e.mode === "demo" ? "DEMO ENGINE" : (eng?.label || e.engine).toUpperCase();
-      $("#coreModel").textContent = e.mode === "demo" ? "SIMULATED JUDGE" : e.engine === "codex-cli" ? "CODEX JUDGE" : e.engine === "claude-cli" ? "CLAUDE JUDGE" : String(e.judge || "").toUpperCase();
-      $("#stackLabel").innerHTML = e.mode === "demo" ? "DEMO <em>·</em> FICTIONAL DATA" : e.engine === "codex-cli" ? "CODEX <em>·</em> YOUR CHATGPT PLAN" : e.engine === "claude-cli" ? `CLAUDE ${esc(String(e.config.claudeModel || "").toUpperCase())} <em>·</em> YOUR CLAUDE PLAN` : esc(String(eng?.label || e.engine).toUpperCase());
+      $("#coreModel").textContent = e.mode === "demo" ? "Explore the research flow" : e.engine === "codex-cli" ? "Powered by Codex" : e.engine === "claude-cli" ? "Powered by Claude" : String(e.judge || "AI research team");
+      $("#stackLabel").textContent = e.mode === "demo" ? "Explore with fictional data" : e.engine === "codex-cli" ? "Your Codex research team" : e.engine === "claude-cli" ? "Your Claude research team" : String(eng?.label || e.engine);
       S.mode = e.mode;
       S.runCountry = e.country;
+      S.requestedFirms = Number(e.config.firms);
       const activeServices = Object.entries(e.config.integrations || {}).filter(([, configured]) => configured).map(([name]) => name);
       $("#integrationMessage").textContent = activeServices.length ? `Configured for this run: ${activeServices.join(", ")}. Each contact shows the sources actually used.` : "This run uses public web research. Optional API connections can expand coverage.";
       setWriter(!!e.config.drafts);
       $("#telemetryMode").textContent = e.mode;
-      $("#targetTag").innerHTML = `TARGET · <b>${e.country.flag} ${esc(e.country.name.toUpperCase())}</b><br>${esc(e.country.language.toUpperCase())} · ${e.config.firms} FIRMS`;
+      $("#targetTag").innerHTML = `<b>${e.country.flag} ${esc(e.country.name)}</b><br>${esc(e.country.language)} · ${e.config.firms} firms`;
+      if (e.estimate) $("#liveEta").textContent = e.mode === "demo" ? `Demo: ${e.estimate.label}` : `${e.estimate.label} remaining · approx.`;
       break;
     }
+    case "research_plan": showResearchPlan(e); break;
     case "stage": setStation(e.stage, e.state); break;
     case "agent": setAgent(e.agent, e.status); break;
     case "task": onTask(e); break;
@@ -437,7 +519,7 @@ function handle(e) {
     case "judge": {
       const f = S.firms.get(e.firmId);
       const r = $("#result");
-      r.textContent = `RESULT · ${(f?.name || "").toUpperCase().slice(0, 22)} · FIT ${e.fit}/5 · ${Number(e.confidence).toFixed(2)}`;
+      r.textContent = `${f?.name || "Firm researched"} · Partnership fit ${e.fit}/5`;
       r.classList.add("flash"); setTimeout(() => r.classList.remove("flash"), 400);
       break;
     }
@@ -454,7 +536,7 @@ function setAgent(a, status) {
   if (card) {
     card.classList.toggle("running", status === "running");
     card.classList.toggle("done", status === "done");
-    card.querySelector(".astat").textContent = status.toUpperCase();
+    card.querySelector(".astat").textContent = ({ running: "Working", done: "Done", error: "Issue", stopped: "Stopped", idle: "Ready" })[status] || status;
   }
   const link = document.querySelector(`#ring .link[data-agent="${a}"]`);
   if (link) {
@@ -503,7 +585,7 @@ function onTask(e) {
     }
     if (a === "judge") { S.judged++; S.judgeMs += e.ms || 0; $("#coreStats").textContent = `${S.judged} scored · ${(S.judgeMs / S.judged / 1000).toFixed(2)}s avg`; }
   }
-  $("#laneStats").textContent = `${S.laneCounts.running} run · ${S.laneCounts.done} done · ${S.errors} err`;
+  $("#laneStats").textContent = `${S.laneCounts.running} active · ${S.laneCounts.done} done · ${S.errors} issues`;
   if (CARD_AGENTS.includes(a)) renderCard(a);
 }
 
@@ -589,6 +671,7 @@ function boardStats() {
   $("#lbContacts").textContent = totals.contacts;
   $("#lbEmails").textContent = totals.emails;
   $("#hVer").textContent = totals.emails;
+  $("#hStrong").textContent = all.filter((f) => (f.fit ?? 0) >= 4).length;
   rankAll();
   filterBoard();
 }
@@ -633,8 +716,11 @@ let drawerReturnFocus = null;
 function renderContact(contact, index) {
   const explanations = { Verified: "Verified by an email verification service. Delivery is not guaranteed.", Published: "Found on a public source. Review the linked evidence.", Inferred: "Inferred from an observed firm email pattern. Not verified.", Guess: "Guessed address. Confirm independently before outreach.", "No mail server": "The domain has no usable mail server.", "Not found": "No email found from the available sources." };
   const checks = { not_checked: "Not checked", mx_present: "Mail server exists; this mailbox has not been verified", mx_missing: "No mail server", unknown: "Verification inconclusive", valid: "Service reports mailbox valid", accept_all: "Catch-all domain; individual mailbox not confirmed", invalid: "Service reports invalid" };
-  const sources = [...new Set([contact.sourceUrl, contact.emailEvidenceUrl, ...(contact.sourceUrls || [])].filter((url) => safeHttpUrl(url)))];
-  return `<article class="contact-card"><div class="contact-head"><strong>${esc(contact.name || `Contact ${index + 1}`)}</strong>${contact.linkedin ? link(contact.linkedin, "LinkedIn") : ""}</div><div class="dr-v">${esc(contact.title || "Role not found")}</div><div class="contact-email">${contact.email ? `<span class="dr-email">${esc(contact.email)}</span>${chip(contact.emailStatus)}` : '<span class="mute">No email found</span>'}</div><div class="field-help">${esc(explanations[contact.emailStatus] || "Review the source and verification status before outreach.")}</div>${contact.emailCheck ? `<div class="field-help">Check: ${esc(checks[contact.emailCheck] || contact.emailCheck)}${contact.verificationProvider ? ` · ${esc(contact.verificationProvider)}` : ""}</div>` : ""}${contact.emailPattern ? `<div class="field-help">Pattern: ${esc(contact.emailPattern)}</div>` : ""}${contact.emailEvidence ? `<div class="dr-v contact-evidence">${esc(contact.emailEvidence)}</div>` : ""}${contact.provider ? `<div class="field-help">Contact source: ${esc(contact.provider)}</div>` : ""}${sources.length ? `<div class="contact-sources">${sources.map((url, i) => link(url, `Source ${i + 1}`)).join(" · ")}</div>` : ""}</article>`;
+  const sources = [...new Set([contact.sourceUrl, contact.emailEvidenceUrl, contact.phoneSourceUrl, ...(contact.sourceUrls || [])].filter((url) => safeHttpUrl(url)))];
+  const roleEvidence = { official_page: "Role evidence found on an official source", public_source: "Role evidence found on a public source", needs_review: "Current role needs independent review", demo: "Fictional demo contact" };
+  const checked = contact.checkedAt && Number.isFinite(Date.parse(contact.checkedAt)) ? new Date(contact.checkedAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "";
+  const phone = contact.phone ? `<div class="contact-phone"><strong>${esc(contact.phone)}</strong><span class="phone-type">${phoneLabel(contact.phoneType)}</span>${contact.phoneSourceUrl ? link(contact.phoneSourceUrl, "Phone source") : '<span class="field-help">Phone source not supplied</span>'}</div>` : '<div class="contact-quality">Professional phone number not found.</div>';
+  return `<article class="contact-card"><div class="contact-head"><strong>${esc(contact.name || `Contact ${index + 1}`)}</strong>${contact.linkedin ? link(contact.linkedin, "Contact LinkedIn") : ""}</div><div class="dr-v">${esc(contact.title || "Role not found")}</div>${contact.roleEvidenceStatus ? `<div class="contact-quality">${esc(roleEvidence[contact.roleEvidenceStatus] || contact.roleEvidenceStatus)}${checked ? ` · Researched ${esc(checked)}` : ""}</div>` : ""}<div class="contact-email">${contact.email ? `<span class="dr-email">${esc(contact.email)}</span>${chip(contact.emailStatus)}` : '<span class="mute">No email found</span>'}</div><div class="field-help">${esc(explanations[contact.emailStatus] || "Review the source and verification status before outreach.")}</div>${contact.emailCheck ? `<div class="field-help">Check: ${esc(checks[contact.emailCheck] || contact.emailCheck)}${contact.verificationProvider ? ` · ${esc(contact.verificationProvider)}` : ""}</div>` : ""}${phone}${contact.emailPattern ? `<div class="field-help">Observed email pattern: ${esc(contact.emailPattern)}</div>` : ""}${contact.emailEvidence ? `<div class="dr-v contact-evidence">${esc(contact.emailEvidence)}</div>` : ""}${contact.provider ? `<div class="field-help">Contact source: ${esc(contact.provider)}</div>` : ""}${sources.length ? `<div class="contact-sources">${sources.map((url, i) => link(url, `Source ${i + 1}`)).join(" · ")}</div>` : ""}</article>`;
 }
 function openDrawer(id, updating = false) {
   const f = S.firms.get(id);
@@ -646,26 +732,30 @@ function openDrawer(id, updating = false) {
   d.dataset.id = id;
   const conf = f.fitConfidence != null ? `${Math.round(f.fitConfidence * 100)}% model confidence` : "";
   const contacts = contactsForFirm(f);
+  const coverage = contactCoverage([f]);
   card.innerHTML = `<button class="dr-close" title="Close" aria-label="Close firm details">✕</button>
     <div class="dr-top"><div><div class="dr-name">${esc(f.name)}</div><div class="dr-sub">${esc([f.type, f.city, f.country].filter(Boolean).join(" · "))} · ${link(f.website)}</div></div>
-      <div class="dr-fit"><b class="fitn ${(f.fit ?? 0) >= 4 ? "" : f.fit === 3 ? "mid" : "low"}">${f.fit ?? "–"}<small style="font-size:13px">/5</small></b><span>FIT ${esc(conf)}</span></div></div>
-    <div class="dr-sec"><div class="dr-k">WHY</div><div class="dr-v">${esc(f.why || "Scoring…")}</div></div>
+      <div class="dr-fit"><b class="fitn ${(f.fit ?? 0) >= 4 ? "" : f.fit === 3 ? "mid" : "low"}">${f.fit ?? "–"}<small style="font-size:13px">/5</small></b><span>Partnership fit${conf ? ` · ${esc(conf)}` : ""}</span></div></div>
+    ${f.summary ? `<div class="dr-v">${esc(f.summary)}</div>` : ""}
+    <div class="dr-sec"><div class="dr-k">Why this firm</div><div class="dr-v">${esc(f.why || "Scoring…")}</div></div>
     <div class="dr-sec dr-grid">
       <div><div class="dr-k">ASSETS UNDER MANAGEMENT</div><div class="dr-v">${esc(f.aum || "—")}</div></div>
       <div><div class="dr-k">INVESTS IN</div><div class="dr-v">${esc(f.assetClasses || "—")}</div></div>
       <div><div class="dr-k">CLIENTS</div><div class="dr-v">${esc(f.segment || "—")}</div></div>
       <div><div class="dr-k">GLOBAL EQUITY TODAY</div><div class="dr-v">${esc(f.globalEquity || "—")}${f.globalEquityEvidence ? ` · ${esc(f.globalEquityEvidence)}` : ""}</div></div>
     </div>
-    <div class="dr-sec"><div class="dr-k">DECISION-MAKERS · ${contacts.length}</div>${contacts.length ? contacts.map(renderContact).join("") : '<div class="dr-v">No contacts found yet.</div>'}</div>
+    <div class="dr-sec"><div class="dr-k">Decision-makers · ${contacts.length}</div><div class="contact-quality">${coverage.evidenceEmails} emails with published or verified evidence · ${coverage.linkedin} contact LinkedIn profiles · ${coverage.directPhones} direct numbers · ${coverage.companyPhones} company numbers</div>${contacts.length ? contacts.map(renderContact).join("") : '<div class="dr-v">No contacts found yet.</div>'}</div>
+    ${f.researchWarnings?.length || f.nextAction ? `<div class="quality-summary">${f.researchWarnings?.length ? `<strong>Research gaps</strong><ul>${f.researchWarnings.map((warning) => `<li>${esc(warning)}</li>`).join("")}</ul>` : ""}${f.nextAction ? `<strong>Suggested next step</strong><p>${esc(f.nextAction)}</p>` : ""}</div>` : ""}
     ${f.body || f.draft || f.subject || f.emailDraft ? `<div class="dr-sec"><div class="dr-k">OUTREACH DRAFT</div><div class="dr-v draft-text">${esc(f.subject || "")}${f.subject ? "\n\n" : ""}${esc(f.body || f.draft || f.emailDraft || "")}</div></div>` : ""}
     ${f.news ? `<div class="dr-sec"><div class="dr-k">RECENT NEWS</div><div class="dr-v">${esc(f.news)}</div></div>` : ""}
     <div class="dr-sec"><div class="dr-k">SOURCE</div><div class="dr-v">${esc(f.source || "")} ${f.sourceUrl ? `· ${link(f.sourceUrl, "link")}` : ""}</div></div>`;
   $("#drawerCard .dr-close").onclick = closeDrawer;
   d.hidden = false;
+  document.body.classList.add("drawer-open");
   card.scrollTop = updating ? scrollTop : 0;
   if (!updating) card.focus();
 }
-function closeDrawer() { const wasOpen = !$("#drawer").hidden; $("#drawer").hidden = true; if (wasOpen) drawerReturnFocus?.focus(); }
+function closeDrawer() { const wasOpen = !$("#drawer").hidden; $("#drawer").hidden = true; document.body.classList.remove("drawer-open"); if (wasOpen) drawerReturnFocus?.focus(); }
 function hashAngle(s) { let h = 2166136261; for (const ch of s) h = Math.imul(h ^ ch.charCodeAt(0), 16777619); return ((h >>> 0) % 3600) / 3600 * Math.PI * 2; }
 
 function onMetrics(m) {
@@ -677,6 +767,7 @@ function onMetrics(m) {
   $("#bReady").textContent = [...S.firms.values()].filter((firm) => (firm.fit ?? 0) >= 4 && contactsForFirm(firm).some(hasEmailEvidence)).length;
   S.target.thr = Number(m.firmsPerMin || 0);
   S.target.lat = Number(m.latencyMs || 0) / 1000;
+  if (S.running) updateProgress(m);
 }
 
 function onDone(e) {
@@ -689,9 +780,14 @@ function onDone(e) {
   setTicker(null, summary.failed ? `research failed · ${totals.firms ? "partial results available" : "no firms found"}` : summary.stopped ? "stopped · partial results available" : `${partial ? "partial results" : "done"} · ${totals.firms} firms · ${totals.contacts} people · ${totals.emails} emails · export ready`, false);
   $("#stop").disabled = true;
   $(".track").classList.remove("running");
-  $("#loopState").textContent = summary.failed ? "FAILED" : summary.stopped ? "STOPPED" : partial ? "PARTIAL" : "COMPLETE";
+  $("#loopState").textContent = summary.failed ? "Failed" : summary.stopped ? "Stopped" : partial ? "Partial results" : "Complete";
   $("#modePill").className = `pill ${S.mode === "demo" ? "demo" : S.mode === "replay" ? "replay" : ""}`;
-  $("#modePill").textContent = `${S.mode.toUpperCase()} · ${$("#loopState").textContent}`;
+  $("#modePill").textContent = `${S.mode === "demo" ? "Demo" : S.mode === "replay" ? "Saved run" : "Live research"} · ${$("#loopState").textContent}`;
+  $("#progressHeading").textContent = summary.failed ? "Research needs attention" : summary.stopped ? "Research stopped" : partial ? "Your partial shortlist is ready" : "Your shortlist is ready";
+  const coverage = contactCoverage([...S.firms.values()]);
+  $("#progressDetail").textContent = `${totals.firms} firms · ${totals.contacts} people · ${coverage.evidenceEmails} evidence-backed emails · ${coverage.linkedin} contact LinkedIn profiles · ${coverage.directPhones + coverage.companyPhones} phone numbers. ${summary.failed || summary.stopped || partial ? "Review the research gaps and partial results." : "Review the evidence, then download your results."}`;
+  $("#liveEta").textContent = `Finished in ${Math.max(1, Math.round(Number(summary.seconds || (performance.now() - S.t0) / 1000)))} seconds`;
+  if (!summary.failed && !summary.stopped && !partial) $("#researchProgress").style.width = "100%";
   $("#tElapsed").textContent = Number(summary.seconds ?? (e.t || 0) / 1000).toFixed(1);
   const outcomeMessage = summary.error || summary.message || (partial ? `Partial results: ${summary.failedFirms || 0} firms had research errors. Review the event log and exported evidence.` : "");
   if (outcomeMessage || summary.warnings?.length) showFormMessage([outcomeMessage, ...(summary.warnings || [])].filter(Boolean).join(" "));
@@ -700,7 +796,7 @@ function onDone(e) {
   $("#dlCsv").disabled = false;
   $("#banner").classList.toggle("win", !summary.failed && !summary.stopped && !partial);
   brain.setEnergy(0.35);
-  for (let i = 0; i < 8; i++) setTimeout(() => brain.pulse(["#2cf5b5", "#ffb23f", "#b48cff", "#5aa9ff"][i % 4]), i * 140);
+  brain.pulse("#b9a9ff");
   CARD_AGENTS.forEach((a) => setAgent(a, summary.failed ? "error" : summary.stopped ? "stopped" : "done"));
   updateLaunch();
   setTimeout(loadStatus, 1500);
@@ -718,9 +814,9 @@ function logLine(e) {
 // ------------------------------------------------------------------ ring + orbit labels
 const ring = { cx: 0, cy: 0, r: 0 };
 function buildRing() {
-  const stage = $("#stage");
+  const stage = $("#signalView");
   const w = stage.clientWidth, h = stage.clientHeight;
-  ring.cx = w / 2; ring.cy = h / 2; ring.r = Math.min(w, h) * 0.5 * 0.8;
+  ring.cx = w * .62; ring.cy = h * .51; ring.r = Math.min(h * .35, w * .275) + 15;
   const { cx, cy, r } = ring;
   let ticks = "";
   for (let d = 0; d < 360; d += 3) {
@@ -728,25 +824,8 @@ function buildRing() {
     ticks += `<line class="tick${major ? " major" : ""}" x1="${cx + Math.cos(a) * r}" y1="${cy + Math.sin(a) * r}" x2="${cx + Math.cos(a) * (r - l)}" y2="${cy + Math.sin(a) * (r - l)}"/>`;
     if (d % 30 === 0) ticks += `<text x="${cx + Math.cos(a) * (r + 12)}" y="${cy + Math.sin(a) * (r + 12) + 3}" text-anchor="middle">${d}°</text>`;
   }
-  const links = { scout: 225, analyst: 315, finder: 135, writer: 45 };
-  let linkPaths = "";
-  const srect = stage.getBoundingClientRect();
-  for (const [a, deg] of Object.entries(links)) {
-    const card = document.querySelector(`.agent[data-agent="${a}"]`);
-    if (!card) continue;
-    const b = card.getBoundingClientRect();
-    const x = (deg === 225 || deg === 135 ? b.right : b.left) - srect.left;
-    const y = (deg === 225 || deg === 315 ? b.bottom : b.top) - srect.top;
-    const ar = (deg * Math.PI) / 180, px = cx + Math.cos(ar) * r, py = cy + Math.sin(ar) * r;
-    linkPaths += `<path class="link" data-agent="${a}" d="M${x} ${y} L${(x + px) / 2} ${y} L${px} ${py}"/><circle cx="${px}" cy="${py}" r="2.5" fill="${AGENTS[a].color}" opacity=".8"/>`;
-  }
   $("#ring").setAttribute("viewBox", `0 0 ${w} ${h}`);
-  $("#ring").innerHTML = `
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="rgba(60,255,196,0.28)"/>
-    <g class="spin" style="transform-origin:${cx}px ${cy}px"><circle cx="${cx}" cy="${cy}" r="${r - 16}" fill="none" stroke="rgba(60,255,196,0.16)" stroke-dasharray="2 7"/>
-      <path d="M${cx + r - 16} ${cy} A ${r - 16} ${r - 16} 0 0 1 ${cx} ${cy + r - 16}" fill="none" stroke="rgba(60,255,196,0.55)" stroke-width="1.5"/></g>
-    <g class="spin rev" style="transform-origin:${cx}px ${cy}px"><circle cx="${cx}" cy="${cy}" r="${r + 26}" fill="none" stroke="rgba(60,255,196,0.1)" stroke-dasharray="14 10"/></g>
-    ${ticks}${linkPaths}`;
+  $("#ring").innerHTML = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="rgba(168,149,235,.13)"/>${ticks}`;
   for (const a of CARD_AGENTS) if (S.stats[a]?.inflight) setAgent(a, "running");
 }
 function renderOrbitLabels() {
@@ -791,6 +870,7 @@ let sweep = 0;
 function drawRadar(dt) {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const w = radar.clientWidth, h = radar.clientHeight;
+  if (w < 40 || h < 40) return;
   if (radar.width !== w * dpr) { radar.width = w * dpr; radar.height = h * dpr; }
   rctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   rctx.clearRect(0, 0, w, h);
@@ -835,37 +915,19 @@ function tick(now) {
   S.gauge.thr += (S.target.thr - S.gauge.thr) * Math.min(1, dt * 3);
   S.gauge.lat += (S.target.lat - S.gauge.lat) * Math.min(1, dt * 3);
   setThr(S.gauge.thr); setLat(S.gauge.lat);
-  drawRadar(dt);
+  if (!document.hidden) drawRadar(reducedMotion.matches || !S.running ? 0 : dt);
   S.orbit.forEach((o, i) => {
-    o.angle += dt * 0.12;
+    if (!reducedMotion.matches && S.running) o.angle += dt * 0.12;
     const n = document.getElementById(`ol-${i}`);
     if (n) { n.style.left = `${ring.cx + Math.cos(o.angle) * ring.r}px`; n.style.top = `${ring.cy + Math.sin(o.angle) * ring.r}px`; n.style.opacity = String(Math.max(0.35, 1 - (now - o.born) / 20000)); }
   });
   if (S.running) $("#tElapsed").textContent = ((now - S.t0) / 1000).toFixed(1);
-  requestAnimationFrame(tick);
+  setTimeout(() => requestAnimationFrame(tick), document.hidden ? 2000 : S.running ? 40 : 800);
 }
 setInterval(() => { $("#clock").textContent = new Date().toLocaleTimeString("en-GB"); }, 1000);
 
 // ------------------------------------------------------------------ boot
 async function boot() {
-  const engine = S.status?.engines.find((entry) => entry.id === $("#engine").value);
-  const lines = [
-    "> init agent loop ................ ok",
-    "> crew: ATLAS · SAGE · JEV · HOUND",
-    "> provider ....................... " + (engine ? `${engine.label}: ${engine.authStatus || (engine.ok ? "ready" : "setup needed")}` : "choose Codex or Claude"),
-    "> judge core ..................... linked",
-    "> loading cortex mesh ............ 94 slices",
-    "> ready.",
-  ];
-  const log = $("#bootlog");
-  if (params.has("noboot")) { $("#boot").classList.add("gone"); return; }
-  for (const l of lines) {
-    log.textContent += l + "\n";
-    $("#bootbar").style.width = `${Math.max(brain.progress(), lines.indexOf(l) / lines.length) * 100}%`;
-    await new Promise((r) => setTimeout(r, 260));
-  }
-  $("#bootbar").style.width = "100%";
-  await new Promise((r) => setTimeout(r, 250));
   $("#boot").classList.add("gone");
 }
 
@@ -876,7 +938,7 @@ async function boot() {
   await loadStatus();
   renderMcp();
   buildRing();
-  new ResizeObserver(buildRing).observe($("#stage"));
+  new ResizeObserver(buildRing).observe($("#signalView"));
   requestAnimationFrame(tick);
   await boot();
   await restoreLastRun();

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isPublicAddress, publicUrl, assertPublicUrl, collectPublicPages, extractPage, normalizeContacts, primaryContact, dedupeFirms, pickContacts, checkMailDomain } from "../lib/research.js";
+import { isPublicAddress, publicUrl, assertPublicUrl, collectPublicPages, extractPage, normalizeContacts, mergeContactEvidence, personLinkedin, normalizeBusinessPhone, contactResearchGaps, researchCoverage, contactEvidenceExcerpt, primaryContact, dedupeFirms, pickContacts, checkMailDomain } from "../lib/research.js";
 
 const publicLookup = async () => [{ address: "93.184.216.34", family: 4 }];
 const business = "https://manager.biz";
@@ -109,4 +109,102 @@ test("MX checks distinguish absent records from network failures without claimin
   assert.equal(await checkMailDomain("manager.biz", { resolveMx: async () => [{ exchange: "." }] }), "mx_missing");
   assert.equal(await checkMailDomain("manager.biz", { resolveMx: async () => { throw Object.assign(new Error("NXDOMAIN"), { code: "ENOTFOUND" }); } }), "mx_missing");
   assert.equal(await checkMailDomain("manager.biz", { resolveMx: async () => { throw Object.assign(new Error("timeout"), { code: "ETIMEOUT" }); } }), "unknown");
+});
+
+test("person profiles exclude company/search URLs and page parsing preserves labeled public phone links", () => {
+  assert.equal(personLinkedin("https://www.linkedin.com/in/jane-smith?trk=foo"), "https://www.linkedin.com/in/jane-smith");
+  for (const url of ["https://www.linkedin.com/company/manager", "https://www.linkedin.com/search/results/people/", "https://linkedin.com.evil.biz/in/jane-smith", "javascript:alert(1)"]) assert.equal(personLinkedin(url), "");
+  const page = extractPage('<p>Company office</p><a href="tel:+44(20)79460958">Main office</a><a href="https://www.linkedin.com/in/jane-smith">Jane Smith</a><a href="https://www.linkedin.com/company/manager">Company</a>', business);
+  assert.deepEqual(page.phoneLinks, [{ phone: "+442079460958", label: "Main office" }]);
+  assert.deepEqual(page.linkedinProfiles, [{ url: "https://www.linkedin.com/in/jane-smith", label: "Jane Smith" }]);
+  assert.equal(normalizeBusinessPhone("+44 (20) 7946 0958 ext. 21"), "+442079460958 ext 21");
+  assert.equal(normalizeBusinessPhone("call Jane"), "");
+});
+
+test("business phone requires a published source and direct-person evidence; private mobile fields are discarded", () => {
+  const team = extractPage('<p>Jane Smith CEO. Jane Smith direct office: +44 20 7946 0958.</p><p>Company switchboard +44 20 7946 0123.</p><p>Alan Doe personal mobile +44 7700 900123.</p>', `${business}/team`);
+  const contacts = normalizeContacts([
+    person("Jane Smith", { phone: "+44 20 7946 0958", phone_type: "direct", phone_source_url: `${business}/team` }),
+    person("Dana Doe", { email: "", phone: "+44 20 7946 0123", phone_type: "company", phone_source_url: `${business}/team`, phone_evidence: "Company switchboard +44 20 7946 0123" }),
+    person("Alan Doe", { email: "", phone: "+44 7700 900123", phone_type: "direct", phone_source_url: `${business}/team`, phone_evidence: "Alan Doe personal mobile +44 7700 900123" }),
+    person("Pat Doe", { email: "", phone: "+44 20 7946 0958", phone_type: "direct", phone_source_url: "" }),
+  ], { firm: { website: business }, pages: [team], limit: 8 });
+  assert.equal(contacts[0].phone, "+442079460958");
+  assert.equal(contacts[0].phoneType, "direct");
+  assert.equal(contacts[1].phoneType, "company");
+  assert.equal(contacts[2].phone, "");
+  assert.equal(contacts[3].phone, "");
+});
+
+test("a team-page direct phone cannot move to the previous person or override fetched text with a fabricated quote", () => {
+  const page = extractPage("Ada Lovelace — Head of Partnerships. Grace Hopper — CIO. Direct office +44 20 7123 4567.", `${business}/team`);
+  for (const quote of ["", "Ada Lovelace direct office +44 20 7123 4567"]) {
+    const [contact] = normalizeContacts([person("Ada Lovelace", { title: "Head of Partnerships", email: "", phone: "+44 20 7123 4567", phone_type: "direct", phone_source_url: `${business}/team`, phone_evidence: quote })], { firm: { website: business }, pages: [page] });
+    assert.equal(contact.phone, "");
+  }
+  const split = extractPage("Company reference 4420. Account code 71234567.", `${business}/contact`);
+  const [contact] = normalizeContacts([person("Ada Lovelace", { email: "", phone: "+44 20 7123 4567", phone_type: "company", phone_source_url: `${business}/contact` })], { firm: { website: business }, pages: [split] });
+  assert.equal(contact.phone, "");
+});
+
+test("freshness distinguishes a fetched current official role from old appointment citations", () => {
+  const page = extractPage('<p>Jane Smith Chief Executive Officer</p><a href="https://www.linkedin.com/in/jane-smith">Jane Smith</a>', `${business}/team`);
+  const contacts = normalizeContacts([
+    person("Jane Smith", { title: "Chief Executive Officer", role_evidence_date: "2020-01-01" }),
+    person("Alan Doe", { email: "", source_url: `${business}/old-appointment`, role_evidence_date: "2020-01-01" }),
+    person("Pat Doe", { title: "Former CEO", email: "" }),
+  ], { pages: [page], limit: 8 });
+  assert.equal(contacts.length, 2);
+  assert.equal(contacts[0].roleEvidenceStatus, "official_page");
+  assert.equal(contacts[0].linkedin, "https://www.linkedin.com/in/jane-smith");
+  assert.equal(contacts[1].roleEvidenceStatus, "needs_review");
+  assert.match(contacts[0].checkedAt, /^\d{4}-\d{2}-\d{2}T/);
+});
+
+test("targeted repairs improve the same contact without duplication or downgrading verified email evidence", () => {
+  const first = normalizeContacts([person("Jane Smith", { email_type: "guess", email_evidence_url: "" })], { firm: { id: "manager" } });
+  const repaired = mergeContactEvidence(first, [person("Jane Smith", { linkedin_url: "https://www.linkedin.com/in/jane-smith" })], { firm: { id: "manager" } });
+  assert.equal(repaired.length, 1);
+  assert.equal(repaired[0].id, first[0].id);
+  assert.equal(repaired[0].emailStatus, "Published");
+  assert.equal(repaired[0].linkedin, "https://www.linkedin.com/in/jane-smith");
+  Object.assign(repaired[0], { emailStatus: "Verified", emailCheck: "valid", verificationProvider: "Hunter", emailScore: 97 });
+  const retained = mergeContactEvidence(repaired, [person("Jane Smith", { email_type: "guess", email_evidence_url: "", email_confidence: 0.3 })], { firm: { id: "manager" } });
+  assert.equal(retained[0].emailStatus, "Verified");
+  assert.equal(retained[0].emailType, "published");
+  assert.equal(retained[0].emailCheck, "valid");
+  assert.equal(retained[0].emailScore, 97);
+  assert.equal(contactResearchGaps(retained, 1).emailNames.length, 0);
+  assert.equal(contactResearchGaps(retained, 1).linkedinNames.length, 0);
+  assert.equal(researchCoverage(retained, [], 1).evidenceBackedEmails, 1);
+});
+
+test("a replacement email loses the previous address verifier and fetched former-role evidence requires review", () => {
+  const first = normalizeContacts([person("Jane Smith")]);
+  Object.assign(first[0], { emailStatus: "Invalid", emailCheck: "invalid", verificationProvider: "Hunter" });
+  const replaced = mergeContactEvidence(first, [person("Jane Smith", { email: "jane@manager.biz" })]);
+  assert.equal(replaced[0].email, "jane@manager.biz");
+  assert.equal(replaced[0].emailCheck, "not_checked");
+  assert.equal(replaced[0].verificationProvider, undefined);
+  const former = normalizeContacts([person("Alan Doe", { email: "" })], { pages: [extractPage("Alan Doe formerly CEO, left the firm.", `${business}/team`)] });
+  assert.equal(former[0].roleEvidenceStatus, "needs_review");
+  const old = normalizeContacts([person("Jane Smith", { source_url: `${business}/press/appointment`, role_evidence_date: "2020-01-01" })], { pages: [extractPage("Jane Smith CEO", `${business}/press/appointment`)] });
+  assert.equal(old[0].roleEvidenceStatus, "needs_review");
+  assert.equal(normalizeContacts([person("Pat Doe", { title: "Ex-CEO" })]).length, 0);
+});
+
+test("contact evidence excerpts keep exact provenance and named leadership while bounding repeated context", () => {
+  const pages = [
+    { ...extractPage(`<p>${"Product information. ".repeat(3000)} Jane Smith CEO. jane.smith@manager.biz</p><a href="https://www.linkedin.com/in/jane-smith">Jane Smith</a>`, `${business}/team`) },
+    { ...extractPage('<p>Company switchboard</p><a href="tel:+442079460958">Main office</a>', `${business}/contact`) },
+  ];
+  // extractPage itself limits general text; put the named contact near the retained section.
+  pages[0].text = `${"Product information. ".repeat(700)} Jane Smith CEO. Business email jane.smith@manager.biz. ${"Product information. ".repeat(700)}`;
+  const excerpt = contactEvidenceExcerpt(pages, { names: ["Jane Smith"], maxChars: 3000 });
+  assert.ok(excerpt.length <= 3000);
+  assert.ok(excerpt.includes(`SOURCE: ${business}/team`) && excerpt.includes(`SOURCE: ${business}/contact`));
+  assert.ok(excerpt.includes("Jane Smith CEO"));
+  assert.ok(excerpt.includes("jane.smith@manager.biz"));
+  assert.ok(excerpt.includes("https://www.linkedin.com/in/jane-smith"));
+  assert.ok(excerpt.includes("+442079460958"));
 });

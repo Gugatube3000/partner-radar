@@ -10,6 +10,7 @@ import { buildWorkbook, buildCsv } from "./lib/excel.js";
 import { getEngineStatuses, MODELS } from "./lib/llm.js";
 import { integrationStatus, saveIntegration, testIntegration } from "./lib/integrations.js";
 import { getMcpStatus, setupMcp } from "./lib/mcp.js";
+import { estimateRun } from "./lib/estimate.js";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 export const ROLES = ["CEO", "Head of Wealth", "Head of Partnerships", "CIO", "Head of Distribution", "Head of Investments", "Business Development"];
@@ -24,6 +25,7 @@ export function normalizeConfig(body) {
     firms: Math.round(bounded(body.firms ?? 15, 15, 3, 100)), contactsPerFirm: Math.round(bounded(body.contactsPerFirm ?? 3, 3, 1, 8)),
     researchDepth: body.researchDepth === "deep" ? "deep" : "balanced", minFit: Math.round(bounded(body.minFit ?? 3, 3, 1, 5)),
     exclude: String(body.exclude || "").slice(0, 2000), template: String(body.template || "").slice(0, 4000), sender: String(body.sender || "").slice(0, 120),
+    researchBrief: String(body.researchBrief || "").trim().slice(0, 2000),
     localLanguage: body.localLanguage !== false, personalize: body.personalize !== false, spendCap: bounded(body.spendCap ?? 3, 3, 0.5, 20),
     speed: bounded(body.speed ?? 1, 1, 0.5, 20), drafts: body.drafts === true, claudeModel: body.claudeModel === "opus" ? "opus" : "sonnet",
     useIntegrations: body.useIntegrations !== false,
@@ -42,7 +44,6 @@ export function createApp() {
   });
   app.use(express.json({ limit: "200kb" }));
   app.use(express.static(path.join(ROOT, "public")));
-  app.use("/vendor/three", express.static(path.join(ROOT, "node_modules/three")));
   function findRun(id) { if (runs.has(id)) return runs.get(id); const saved = loadSavedRun(id); if (saved) runs.set(id, saved); return saved; }
   app.get("/api/status", async (req, res) => {
     const statuses = await getEngineStatuses({ refresh: req.query.refresh === "1" });
@@ -53,6 +54,9 @@ export function createApp() {
   app.delete("/api/integrations/:id", (req, res) => { try { res.json(saveIntegration(req.params.id, "")); } catch (error) { res.status(400).json({ error: error.message }); } });
   app.post("/api/integrations/:id/test", async (req, res) => { try { res.json(await testIntegration(req.params.id)); } catch (error) { res.status(400).json({ error: error.message }); } });
   app.get("/api/mcp", async (_req, res) => res.json(await getMcpStatus()));
+  const estimate = (req, res) => { const body = req.method === "GET" ? { ...req.query, drafts: req.query.drafts === "true" || req.query.drafts === "1" } : req.body || {}; const config = normalizeConfig(body); res.json(estimateRun(config, String(body.engine || "codex-cli"), body.mode === "demo" ? "demo" : "live")); };
+  app.get("/api/estimate", estimate);
+  app.post("/api/estimate", estimate);
   app.post("/api/mcp/:provider/:id/setup", async (req, res) => { try { res.json(await setupMcp(req.params.provider, req.params.id)); } catch (error) { res.status(400).json({ error: error.message }); } });
   app.post("/api/runs", async (req, res) => {
     const body = req.body || {};
@@ -66,10 +70,11 @@ export function createApp() {
       const status = Array.isArray(statuses) ? statuses.find((item) => item.id === engine) : statuses[engine];
       if (!status?.ok) return res.status(400).json({ error: status?.message || "Select an installed and signed-in provider" });
     }
+    if ([...runs.values()].filter((run) => !run.done).length >= 2) return res.status(409).json({ error: "Two runs are already active. Stop or finish one first." });
     const config = normalizeConfig(body), country = getCountry(countryCode), run = new Run({ mode, engine, config, country });
     runs.set(run.id, run);
     const model = mode === "demo" ? "demo" : engine === "claude-cli" ? config.claudeModel : MODELS[engine]?.brain || "Provider default";
-    run.emit("run", { id: run.id, mode, engine, config, country, model, judge: model });
+    run.emit("run", { id: run.id, mode, engine, config, country, model, judge: model, estimate: run.estimate });
     runPipeline(run).catch((error) => { run.log("err", "pipeline", String(error?.message || error)); run.done = true; run.emit("done", { failed: !run.aborted, stopped: run.aborted, state: run.aborted ? "stopped" : "failed", outcome: run.aborted ? "stopped" : "failed", partial: !!run.firms.size, error: String(error?.message || error), firms: run.firms.size }); });
     res.json({ id: run.id });
   });

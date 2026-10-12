@@ -3,136 +3,48 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Partner Radar</title>
+  <meta name="theme-color" content="#645be8">
+  <meta name="description" content="Find investment partners and decision-makers with a focused AI research team. Review sources, contact evidence and export your shortlist.">
+  <title>Partner Radar · Partnership research</title>
   <link rel="stylesheet" href="/styles.css">
-  <script type="importmap">{ "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }</script>
 </head>
 <body>
-  <div id="boot" class="boot"><div class="boot-inner"><div class="boot-title">PARTNER RADAR</div><pre id="bootlog"></pre><div class="boot-bar"><i id="bootbar"></i></div></div></div>
-
+  <a class="skip-link" href="#missionHeading">Skip to research setup</a>
+  <div id="boot" class="boot gone" aria-hidden="true"><div id="bootlog"></div><i id="bootbar"></i></div>
   <div class="app">
     <header class="hdr">
-      <div class="brand">
-        <div class="title"><span class="t1">PARTNER RADAR</span><span class="t2" id="stackLabel">YOUR RESEARCH CREW</span></div>
-        <div class="sub">GLOBAL EQUITY PARTNERSHIPS · AGENT LOOP · <span id="engineLabel">DEMO ENGINE</span> · BUILD 2026.10</div>
-      </div>
-      <div class="hstats">
-        <div><span>FIRMS/MIN</span><b id="hFpm">0.0</b></div>
-        <div><span>IN FLIGHT</span><b id="hInf">0</b></div>
-        <div><span>MAPPED</span><b id="hFound">0</b></div>
-        <div><span>EMAILS</span><b id="hVer">0</b></div>
-        <div><span>FIT 4+</span><b id="hStrong">0</b></div>
-      </div>
-      <div class="hright"><span id="modePill" class="pill">STANDBY</span><span id="clock" class="clock">00:00:00</span></div>
+      <a class="brand" href="/" aria-label="Partner Radar home"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span class="t1">Partner Radar</span><span class="version">Research studio</span></a>
+      <div class="hright"><span id="modePill" class="pill">Ready to research</span><span id="clock" class="clock">00:00:00</span></div>
     </header>
-
-    <nav class="track">
-      <div class="track-label">LOOP · PIPELINE · <span id="loopState">IDLE</span></div>
-      <div class="stations" id="stations"></div>
-      <div class="track-right">TASKS <b id="tTasks">0</b> · ERRORS <b id="tErr">0</b> · T+<b id="tElapsed">0.0</b>s</div>
-    </nav>
-
+    <section class="intro" aria-labelledby="pageHeading">
+      <div class="intro-copy"><h1 id="pageHeading">Your next partnership<br>starts with a better shortlist.</h1><p>Give your AI team a market and a brief. Get the firms, the right people, and the evidence to take the next step.</p></div>
+      <div class="intro-note"><span class="intro-orbit" aria-hidden="true">◎</span><div><strong id="stackLabel">Your research team, connected</strong><p>Use your Codex or Claude subscription.<br>Keep every source close to the result.</p><span id="engineLabel" class="sr-only">No provider selected</span></div></div>
+    </section>
     <main class="grid">
-      <aside class="panel mission">
-        <div class="ph">MISSION <span class="ph-r">brief the crew</span></div>
+      <aside class="panel mission" aria-labelledby="missionHeading">
+        <div class="ph"><h2 id="missionHeading" tabindex="-1">Set your direction</h2><span class="ph-r">New research</span></div>
         <div class="mission-body">
-          <label class="fl" for="engine">Choose your subscription</label>
-          <select id="engine"><option value="">Select Codex or Claude…</option></select>
-          <div class="engine-note" id="engineNote" role="status" aria-live="polite">Checking providers…</div>
-          <button type="button" id="refreshStatus" class="quiet-btn">Refresh connection status</button>
-          <details id="providerSetup" class="setup"><summary>Install &amp; sign in</summary><div id="providerInstructions"></div></details>
-          <div id="modelRow" hidden><label class="fl" for="claudeModel">Claude model</label><select id="claudeModel"><option value="sonnet">Sonnet · faster</option><option value="opus">Opus · deeper</option></select></div>
-          <label class="fl" for="runMode">Run mode</label>
-          <select id="runMode"><option value="live">Live research</option><option value="demo">Demo · fictional data, no subscription needed</option></select>
-
-          <label class="fl" for="countrySearch">Target country or territory</label>
-          <input id="countrySearch" type="search" placeholder="Search name or country code" autocomplete="off" aria-controls="country">
-          <select id="country" aria-label="Target country or territory"></select>
-          <div class="field-help" id="countryCount"></div>
-
-          <div class="lookfor">Find firms investing in <b>equities or fixed income</b>, score their partnership fit, and research multiple decision-makers. Review each email's evidence before outreach.</div>
-
-          <label class="fl" for="firms">How many firms <b id="firmsVal">8</b></label>
-          <input type="range" id="firms" min="3" max="100" value="8">
-          <div class="row2"><div><label class="fl" for="contactsPerFirm">People per firm</label><select id="contactsPerFirm"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></div><div><label class="fl" for="researchDepth">Research depth</label><select id="researchDepth"><option value="balanced">Balanced</option><option value="deep">Deep · more searches</option></select></div></div>
-          <div class="field-help">Larger runs and deep research take longer and use more of your plan.</div>
-          <details class="targeting"><summary>Firm types &amp; target roles</summary><label class="fl">Firm types</label><div id="types" class="chips" aria-label="Firm types"></div><label class="fl">Decision-maker roles</label><div id="roles" class="chips" aria-label="Decision-maker roles"></div></details>
-
-          <label class="fl" for="exclude">Skip these firms <span class="hint">already contacted</span></label>
-          <textarea id="exclude" rows="2" placeholder="One per line"></textarea>
-
-          <label class="fl">Extras</label>
-          <div class="toggles"><label><input type="checkbox" id="drafts"> Also draft first emails (optional)</label></div>
-
-          <label class="fl w-only" for="template">Email template <span class="hint">{{first_name}} {{firm}} {{country}} {{language}} {{why}} {{sender}}</span></label>
-          <textarea id="template" class="w-only" rows="9"></textarea>
-
-          <div class="row2 w-only">
-            <div><label class="fl" for="sender">Signed by</label><input id="sender" placeholder="Your name, title"></div>
-            <div><label class="fl" for="minFit">Draft if fit ≥</label><select id="minFit"><option>2</option><option selected>3</option><option>4</option></select></div>
-          </div>
-          <div class="toggles w-only">
-            <label><input type="checkbox" id="localLanguage" checked> Write in their language</label>
-            <label><input type="checkbox" id="personalize" checked> Personal first line</label>
-          </div>
-
-          <details id="integrationPanel" class="setup integrations"><summary>Connections · Hunter, Apollo &amp; MCP</summary><div class="field-help">Optional services can improve contact and email coverage. Add a service key locally, or connect its MCP tools to your selected provider.</div><div id="integrationsList"></div><div id="mcpList"></div><div id="integrationMessage" role="status" aria-live="polite"></div></details>
-          <div class="form-message" id="formMessage" role="alert" hidden></div>
-          <div id="replayBox" class="replaybox"></div>
+          <div class="form-section"><label class="fl" for="engine">Choose your subscription</label><select id="engine"><option value="">Select Codex or Claude…</option></select><div class="engine-note" id="engineNote" role="status" aria-live="polite">Checking providers…</div><div class="provider-actions"><button type="button" id="refreshStatus" class="quiet-btn">Refresh status</button><details id="providerSetup" class="setup"><summary>Sign-in help</summary><div id="providerInstructions"></div></details></div><div id="modelRow" hidden><label class="fl" for="claudeModel">Claude model</label><select id="claudeModel"><option value="sonnet">Sonnet · faster</option><option value="opus">Opus · deeper</option></select></div></div>
+          <div class="form-section"><label class="fl" for="countrySearch">Where do you want to find partners?</label><input id="countrySearch" type="search" placeholder="Search countries or country codes" autocomplete="off" aria-controls="country"><select id="country" aria-label="Target country or territory"></select><div class="field-help" id="countryCount"></div><div class="row2 coverage-row"><div><label class="fl" for="firms">Firms to research <b id="firmsVal">8</b></label><input type="range" id="firms" min="3" max="100" value="8"><div class="range-labels"><span>3</span><span>100</span></div></div><div><label class="fl" for="contactsPerFirm">People per firm</label><select id="contactsPerFirm"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></div></div></div>
+          <div class="form-section brief-section"><label class="fl brief-label" for="researchBrief">Want more specific research? <span class="optional">Optional</span></label><p class="field-help">Tell the team what an ideal partner looks like, the opportunity, and anything to avoid.</p><textarea id="researchBrief" rows="4" maxlength="2000" placeholder="e.g. Independent wealth managers serving HNW clients, interested in international equities. Prioritize heads of partnerships; exclude firms owned by large banks."></textarea><div class="brief-examples" aria-label="Research brief examples"><span>Try a starting point</span><button type="button" data-brief="Find independent wealth managers serving HNW clients who could distribute international equity products. Prioritize heads of partnerships and distribution; exclude firms owned by large banks.">Wealth partnerships</button><button type="button" data-brief="Find digital investment platforms with retail investors and an interest in global equities. Prioritize business development and product leaders. Look for evidence of third-party product partnerships.">Digital platforms</button><button type="button" data-brief="Find asset managers and family offices seeking global fixed-income solutions. Prioritize CIOs and heads of investments, with evidence of an international investment mandate.">Institutional investors</button></div><div class="brief-feedback" id="briefFeedback" aria-live="polite">The team will research investment firms and partnership decision-makers.</div></div>
+          <div class="row2"><div><label class="fl" for="researchDepth">Research depth</label><select id="researchDepth"><option value="balanced">Balanced</option><option value="deep">Deep · broader evidence</option></select></div><div><label class="fl" for="runMode">Research mode</label><select id="runMode"><option value="live">Live research</option><option value="demo">Explore a fictional demo</option></select></div></div>
+          <div class="targeting-summary" id="targetingSummary"></div><details class="targeting"><summary>Fine-tune firm types &amp; roles</summary><label class="fl">Firm types</label><div id="types" class="chips" aria-label="Firm types"></div><label class="fl">Decision-maker roles</label><div id="roles" class="chips" aria-label="Decision-maker roles"></div><label class="fl" for="exclude">Skip these firms</label><textarea id="exclude" rows="2" placeholder="Already contacted? Add one firm per line."></textarea></details>
+          <details class="draft-setup"><summary>Optional outreach drafts</summary><div class="toggles"><label><input type="checkbox" id="drafts"> Draft a first email for suitable firms</label></div><label class="fl w-only" for="template">Your email template</label><textarea id="template" class="w-only" rows="8"></textarea><div class="field-help w-only">Use {{first_name}}, {{firm}}, {{country}}, {{language}}, {{why}} and {{sender}}.</div><div class="row2 w-only"><div><label class="fl" for="sender">Signed by</label><input id="sender" placeholder="Your name, title"></div><div><label class="fl" for="minFit">Minimum fit score</label><select id="minFit"><option>2</option><option selected>3</option><option>4</option></select></div></div><div class="toggles w-only"><label><input type="checkbox" id="localLanguage" checked> Write in their language</label><label><input type="checkbox" id="personalize" checked> Personalize the first line</label></div></details>
+          <details id="integrationPanel" class="setup integrations"><summary>Connections <span class="connection-tags">Hunter · Apollo · MCP</span></summary><div class="field-help">Optional connections can improve contact coverage. Keys are saved on this computer.</div><div class="toggles"><label><input id="useIntegrations" type="checkbox" checked> Use connected services in this research</label></div><div id="integrationsList"></div><div id="mcpList"></div><div id="integrationMessage" role="status" aria-live="polite"></div></details>
+          <div class="form-message" id="formMessage" role="alert" hidden></div><div id="replayBox" class="replaybox"></div>
         </div>
-        <div class="mission-foot">
-          <button id="launch" class="launch"><span>▶ START RESEARCH</span><small id="launchSub">choose your subscription</small></button>
-          <button id="stop" class="stopbtn" title="Stop research" aria-label="Stop research" disabled>■</button>
-        </div>
+        <div class="mission-foot"><div class="estimate" role="status" aria-live="polite"><span class="estimate-icon" aria-hidden="true">◷</span><div><span>Approximate research time</span><strong id="estimateValue">Calculating…</strong><small id="estimateBasis">Based on your research scope. Actual time may vary.</small></div></div><div class="launch-actions"><button id="launch" class="launch" disabled><span>Start research <i aria-hidden="true">↗</i></span><small id="launchSub">Choose your subscription</small></button><button id="stop" class="stopbtn" disabled>Stop</button></div></div>
       </aside>
-
-      <section class="stage" id="stage">
-        <canvas id="brain"></canvas>
-        <div class="stage-grid"></div>
-        <svg id="ring" class="ring"></svg>
-        <div id="orbitLabels" class="orbit-labels"></div>
-        <div id="agents"></div>
-        <div class="core"><div class="core-k">JUDGE CORE</div><div class="core-v" id="coreModel">CHOOSE YOUR PROVIDER</div><div class="core-s" id="coreStats">0 scored · — avg</div></div>
-        <div class="ticker" id="ticker"><span class="tk-dot"></span><span id="tickerText">standing by</span></div>
-        <div class="result" id="result">RESULT · AWAITING SIGNAL</div>
-        <div class="banner" id="banner"><span>OUTREACH CANDIDATES</span><b id="bReady">0</b><i>/</i><b id="bTotal">0</b><small id="bannerSub">fit 4+ · published or verified email</small></div>
-        <div class="stage-tl">CORTEX · <span id="cortexState">ASSEMBLING</span></div>
-        <div class="stage-tr" id="targetTag">TARGET · —</div>
+      <section class="research-workbench" aria-label="Research progress">
+        <section class="stage" id="stage" aria-labelledby="teamHeading"><div class="stage-heading"><div><h2 id="teamHeading">A focused team. A clearer signal.</h2><p>Discover, investigate, score, and connect.</p></div><span class="stage-tl">Signal <span id="cortexState">Ready</span></span></div><div class="signal-view" id="signalView"><canvas id="brain" aria-hidden="true"></canvas><svg id="ring" class="ring" aria-hidden="true"></svg><div id="orbitLabels" class="orbit-labels" aria-hidden="true"></div><div class="signal-caption"><div class="core-k">Partnership intelligence</div><div class="core-v" id="coreModel">Choose your provider</div><div class="core-s" id="coreStats">Evidence before outreach.</div></div><div class="stage-tr" id="targetTag">Your next market</div><div class="result" id="result">Waiting for your direction</div></div><div class="ticker" id="ticker" role="status" aria-live="polite"><span class="tk-dot"></span><span id="tickerText">Your research team is ready.</span></div><div id="agents"></div></section>
+        <div class="panel progress-panel"><div class="progress-top"><div><span class="field-help">Research progress</span><h2 id="progressHeading">Ready when you are</h2><p id="progressDetail">Set a direction. Your team will build a shortlist with linked evidence.</p></div><span id="liveEta" class="live-eta">No run in progress</span></div><div class="progress-bar"><i id="researchProgress"></i></div><nav class="track" aria-label="Research stages"><div class="track-label">Team workflow <span id="loopState">Ready</span></div><div class="stations" id="stations"></div><div class="track-right"><span>Tasks <b id="tTasks">0</b></span><span>Issues <b id="tErr">0</b></span><span>Elapsed <b id="tElapsed">0.0</b>s</span></div></nav></div>
+        <div class="research-summary panel"><div class="summary-text"><h2>From research to a useful shortlist</h2><p id="planSummary">The team checks investment focus, evaluates partnership fit, then researches people and contact evidence.</p><details id="researchPlan" hidden><summary>View the research approach</summary><div id="planDetail"></div></details></div><div class="banner" id="banner"><span>Strong-fit firms with contact evidence</span><div><b id="bReady">0</b><i>/</i><b id="bTotal">0</b></div><small id="bannerSub">Fit 4+ and a published or verified email</small></div></div>
       </section>
-
-      <aside class="panel telemetry">
-        <div class="ph">TELEMETRY <span class="ph-r" id="telemetryMode">standby</span></div>
-        <div class="gauges"><div class="gauge" id="gThr"></div><div class="gauge" id="gLat"></div></div>
-        <div class="ph sub">FIT MAP · RADAR <span class="ph-r">center = best fit</span></div>
-        <div class="radar-wrap"><canvas id="radar"></canvas>
-          <div class="radar-legend"><span><i style="background:#2cf5b5"></i>published</span><span><i style="background:#5cd6ff"></i>inferred</span><span><i style="background:#ffb23f"></i>guess</span><span><i style="background:#ff5c70"></i>none</span></div>
-        </div>
-        <div class="ph sub">EVENT LOG</div>
-        <div id="log" class="log"></div>
-      </aside>
-
-      <section class="panel board">
-        <div class="lanes-wrap">
-          <div class="ph">TASKS <span class="ph-r" id="laneStats">0 run · 0 done · 0 err</span></div>
-          <div class="lanes" id="lanes"></div>
-        </div>
-        <div class="leads">
-          <div class="ph lb-head">LEAD BOARD
-            <span class="lb-stats"><span>FIRMS <b id="lbFound">0</b></span><span>SCORED <b id="lbScored">0</b></span><span>FIT 4+ <b id="lbStrong">0</b></span><span>PEOPLE <b id="lbContacts">0</b></span><span>EMAILS <b id="lbEmails">0</b></span></span>
-            <button id="lbMax" class="lb-btn" title="Expand the board">⤢ EXPAND</button>
-            <button id="dl" class="dl" disabled>⬇ EXCEL</button>
-            <button id="dlCsv" class="lb-btn" disabled>CSV</button>
-          </div>
-          <div class="board-filters"><input type="search" id="leadSearch" aria-label="Search firms, people, roles or emails" placeholder="Search firms, people, roles or emails"><select id="emailFilter" aria-label="Filter by email evidence"><option value="all">All email statuses</option><option value="found">Has an email</option><option value="evidence">Published or verified</option><option value="missing">No usable email</option></select><select id="fitFilter" aria-label="Filter by partnership fit"><option value="all">All fit scores</option><option value="4">Fit 4+</option><option value="3">Fit 3+</option></select><span id="resultCount" aria-live="polite">0 firms</span></div>
-          <div class="table" id="table">
-            <div class="tr th"><span>#</span><span>FIRM</span><span>INVESTS IN</span><span>FIT</span><span>PEOPLE</span><span>EMAIL &amp; EVIDENCE</span><span></span></div>
-            <div id="rows"><div class="empty" id="lbEmpty">Choose a country and start research. Firms appear here as they are found; open one to see all its people and sources.</div></div>
-            <div id="filterEmpty" class="empty" hidden>No firms match these filters. Try a different search or email status.</div>
-          </div>
-        </div>
-      </section>
+      <section class="panel board" aria-labelledby="resultsHeading"><div class="leads"><div class="ph lb-head"><div><h2 id="resultsHeading">Your partnership shortlist</h2><p>Ranked by fit. Open a firm to review people, phones, LinkedIn and sources.</p></div><div class="export-actions"><button id="lbMax" class="lb-btn">Focus results</button><button id="dl" class="dl" disabled>Download Excel</button><button id="dlCsv" class="lb-btn" disabled>CSV</button></div></div><div class="hstats"><div><span>Firms found</span><b id="hFound">0</b><span class="sr-only" id="lbFound">0</span></div><div><span>Strong fit</span><b id="hStrong">0</b><span class="sr-only" id="lbStrong">0</span></div><div><span>People found</span><b id="lbContacts">0</b></div><div><span>Emails found</span><b id="hVer">0</b><span class="sr-only" id="lbEmails">0</span></div><div><span>Firms scored</span><b id="lbScored">0</b></div><div class="sr-only"><span>Firms per minute</span><b id="hFpm">0</b><span>In flight</span><b id="hInf">0</b></div></div><div class="board-filters"><label class="search-label"><span class="sr-only">Search firms, people, roles, phones or emails</span><input type="search" id="leadSearch" placeholder="Search firms, people, roles, phones or emails"></label><select id="emailFilter" aria-label="Filter by email evidence"><option value="all">All email evidence</option><option value="found">Has an email</option><option value="evidence">Published or verified</option><option value="missing">No usable email</option></select><select id="fitFilter" aria-label="Filter by partnership fit"><option value="all">All fit scores</option><option value="4">Fit 4+</option><option value="3">Fit 3+</option></select><span id="resultCount" aria-live="polite">0 firms</span></div><div class="table" id="table"><div class="tr th" aria-hidden="true"><span>#</span><span>Firm</span><span>Investment focus</span><span>Fit / 5</span><span>People</span><span>Email &amp; evidence</span><span></span></div><div id="rows"><div class="empty" id="lbEmpty"><span class="empty-mark" aria-hidden="true">◎</span><strong>Your next market is waiting.</strong><p>Choose a country and start research. Firms and people appear here as the team finds them.</p><span>Excel includes contact LinkedIn, professional phone numbers when found, and source links.</span></div></div><div id="filterEmpty" class="empty" hidden>No firms match these filters. Try a different search or email status.</div></div></div></section>
+      <details class="panel telemetry"><summary>Research activity &amp; diagnostics <span id="telemetryMode">Ready</span></summary><div class="telemetry-content"><div class="diagnostic-overview"><div class="gauges"><div class="gauge" id="gThr"></div><div class="gauge" id="gLat"></div></div><div class="radar-wrap"><canvas id="radar" aria-label="Partnership fit map"></canvas><div class="radar-legend"><span><i style="background:#27b98f"></i>Published</span><span><i style="background:#80aaff"></i>Inferred</span><span><i style="background:#e6ae53"></i>Guessed</span><span><i style="background:#e97891"></i>Missing</span></div></div></div><div class="lanes-wrap"><div class="ph">Agent tasks <span class="ph-r" id="laneStats">0 active · 0 done · 0 issues</span></div><div class="lanes" id="lanes"></div></div><div id="log" class="log" aria-label="Research event log"></div></div></details>
       <div id="drawer" class="drawer" hidden><div class="drawer-card" id="drawerCard" role="dialog" aria-modal="true" aria-label="Firm and contact details" tabindex="-1"></div></div>
     </main>
+    <footer class="app-footer"><span>Partner Radar</span><span>Research you can review. Relationships you can build.</span></footer>
   </div>
   <script type="module" src="/app.js"></script>
 </body>

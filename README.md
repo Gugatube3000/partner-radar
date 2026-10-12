@@ -4,7 +4,16 @@ Research financial partners worldwide using **your Codex / ChatGPT subscription 
 
 ![Partner Radar dashboard](screenshot.png)
 
-## What changed in version 2
+## What changed in version 3
+
+- **A clearer research studio:** larger text, readable contact details, a focused research form and a live agent workspace. Advanced options stay available without crowding the main flow.
+- **Your own research brief:** “Want more specific research?” lets you describe the ideal partner, opportunity, priorities and exclusions. The brief guides scouting, company analysis, scoring and contact research.
+- **Targeted follow-ups:** agents inspect missing people, usable email evidence, LinkedIn profiles and role evidence, then make one focused repair pass rather than repeating an unfocused search.
+- **Time ranges before launch:** a planning estimate responds to firm count, depth, contacts, drafts and provider. It uses local successful-call timings when available, then updates remaining work from actual pipeline stages. Estimates are approximate.
+- **Richer exports:** individual LinkedIn links, public professional phones, direct-line/company-switchboard labels, source URLs, role evidence, timestamps and next actions. Missing or unsupported details remain blank.
+- **Research quality:** a firm evidence file and coverage summary show what was found, what remains uncertain and the next useful action. [Research behind the changes](docs/RESEARCH-NOTES.md).
+
+The version 2 foundations remain:
 
 - **250 destinations:** all 249 ISO countries and territories, plus Kosovo, with emoji flags, region groups and country search.
 - **More coverage:** up to 100 firms, several discovery passes through regulators, associations and local-language sources, with duplicate firms removed.
@@ -32,7 +41,7 @@ npm ci
 npm start
 ```
 
-Open [localhost:4747](http://localhost:4747), choose **Codex** or **Claude**, select a country and launch. The explicitly labeled demo uses fictional `.example` data and does not make AI calls. Keep the terminal open while the app runs.
+Open [localhost:4747](http://localhost:4747), choose **Codex** or **Claude**, select a country, add a specific brief if needed and review the time estimate before launching. The explicitly labeled demo uses fictional `.example` data and does not make AI calls. Keep the terminal open while the app runs.
 
 ## Hunter, Apollo and Firecrawl
 
@@ -85,4 +94,4 @@ npm run check
 npm test
 ```
 
-Regression tests use fake CLIs and mocked network responses for subscription authentication, output parsing, cancellation, scouting, contact evidence, integration keys, email verification, countries, exports and saved-run recovery.
+Regression tests use fake CLIs and mocked network responses for subscription authentication, output parsing, cancellation, scouting, adaptive evidence repair, public business phones, individual LinkedIn profiles, time ranges, integration keys, email verification, countries, exports and saved-run recovery. These checks establish implementation behavior; public-web coverage still varies by country and source.

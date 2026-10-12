@@ -208,6 +208,91 @@ test("optional enrichment integrations", async (t) => {
     });
   });
 
+  await t.test("Hunter reads the Finder LinkedIn field and never treats generic email sources as phone proof", async () => {
+    await isolated(async ({ api, respond }) => {
+      api.saveIntegration("hunter", "fixture-hunter-secret");
+      respond((request) => request.url.pathname.endsWith("domain-search") ? { data: { emails: [] } } : { data: {
+        first_name: "Ada", last_name: "Lovelace", email: "ada@firm.example", verification: { status: "valid" },
+        linkedin_url: "https://www.linkedin.com/in/ada-lovelace/?trk=provider", phone_number: "+1 202 555 0123", sources: [{ uri: "https://firm.example/team" }],
+      } });
+      const found = await api.enrichContacts("firm.example", [person], hunterOnly);
+      assert.equal(found[0].linkedin, "https://www.linkedin.com/in/ada-lovelace/");
+      assert.equal(found[0].phone || "", "", "email attribution does not establish a phone's business source");
+    });
+  });
+
+  await t.test("Hunter recognizes selected roles and diacritic-equivalent names without creating duplicates", async () => {
+    await isolated(async ({ api, respond }) => {
+      api.saveIntegration("hunter", "fixture-hunter-secret");
+      respond(() => ({ data: { emails: [{ first_name: "Jose", last_name: "Munoz", position: "Product Specialist", value: "jose@firm.example", verification: { status: "valid" }, sources: [{ uri: "https://firm.example/team" }], linkedin: "https://www.linkedin.com/in/jose-munoz" }] } }));
+      const found = await api.enrichContacts("firm.example", [{ ...person, name: "José Muñoz" }], { ...hunterOnly, roles: ["Product Specialist"] });
+      assert.equal(found.length, 1);
+      assert.equal(found[0].name, "José Muñoz");
+      assert.equal(found[0].email, "jose@firm.example");
+    });
+  });
+
+  await t.test("Apollo rejects the documented nested low-confidence match", async () => {
+    await isolated(async ({ api, respond }) => {
+      api.saveIntegration("apollo", "fixture-apollo-secret");
+      respond(() => ({ person: { name: "Ada Lovelace", match_confidence: "low", email: "ada@firm.example", linkedin_url: "https://www.linkedin.com/in/ada-lovelace", organization: { primary_domain: "firm.example" } } }));
+      assert.equal((await api.enrichContacts("firm.example", [person], apolloOnly))[0].email, "");
+    });
+  });
+
+  await t.test("Apollo can add a missing person profile while preserving independently verified email and published office phone", async () => {
+    await isolated(async ({ api, respond, requests }) => {
+      api.saveIntegration("apollo", "fixture-apollo-secret");
+      respond(() => ({ person: { name: "Ada Lovelace", match_confidence: "high", email: "new@firm.example", linkedin_url: "https://www.linkedin.com/in/ada-lovelace?trk=apollo", organization: { primary_domain: "firm.example" }, phone_numbers: [{ raw_number: "+1 202 555 9999", type: "mobile" }] } }));
+      const contact = { ...person, email: "ada@firm.example", emailType: "published", emailStatus: "Verified", emailCheck: "valid", verificationProvider: "Hunter", phone: "+442071234567", phoneType: "direct", phoneSourceUrl: "https://firm.example/team" };
+      const found = (await api.enrichContacts("firm.example", [contact], apolloOnly))[0];
+      assert.equal(found.linkedin, "https://www.linkedin.com/in/ada-lovelace");
+      assert.equal(found.email, contact.email);
+      assert.equal(found.emailStatus, "Verified");
+      assert.equal(found.emailCheck, "valid");
+      assert.equal(found.verificationProvider, "Hunter");
+      assert.equal(found.phone, contact.phone);
+      assert.equal(found.phoneSourceUrl, contact.phoneSourceUrl);
+      assert.equal(requests[0].body.reveal_phone_number, false);
+      assert.equal("webhook_url" in requests[0].body, false);
+    });
+  });
+
+  await t.test("Apollo adds profile-only data only for a matching firm and never accepts company LinkedIn as a contact", async () => {
+    await isolated(async ({ api, respond }) => {
+      api.saveIntegration("apollo", "fixture-apollo-secret");
+      respond(() => ({ person: { name: "Ada Lovelace", match_confidence: "high", linkedin_url: "https://www.linkedin.com/company/firm", organization: { primary_domain: "firm.example" } } }));
+      const found = await api.enrichContacts("firm.example", [{ ...person, linkedin: "https://www.linkedin.com/search/results/people/" }], apolloOnly);
+      assert.equal(found[0].linkedin, "");
+      assert.equal(found[0].email, "");
+    });
+  });
+
+  await t.test("Apollo profile enrichment preserves a real invalid check for the same address", async () => {
+    await isolated(async ({ api, respond }) => {
+      api.saveIntegration("apollo", "fixture-apollo-secret");
+      respond(() => ({ person: { name: "Ada Lovelace", match_confidence: "high", email: "ada@firm.example", email_status: "verified", linkedin_url: "https://www.linkedin.com/in/ada-lovelace", organization: { primary_domain: "firm.example" } } }));
+      const contact = { ...person, email: "ada@firm.example", emailStatus: "Invalid", emailCheck: "invalid", verificationProvider: "Hunter" };
+      const found = (await api.enrichContacts("firm.example", [contact], apolloOnly))[0];
+      assert.equal(found.emailStatus, "Invalid");
+      assert.equal(found.emailCheck, "invalid");
+      assert.equal(found.verificationProvider, "Hunter");
+      assert.equal(found.linkedin, "https://www.linkedin.com/in/ada-lovelace");
+    });
+  });
+
+  await t.test("a different Apollo address does not inherit verification for the old invalid address", async () => {
+    await isolated(async ({ api, respond }) => {
+      api.saveIntegration("apollo", "fixture-apollo-secret");
+      respond(() => ({ person: { name: "Ada Lovelace", match_confidence: "high", email: "new@firm.example", organization: { primary_domain: "firm.example" } } }));
+      const found = (await api.enrichContacts("firm.example", [{ ...person, email: "old@firm.example", emailStatus: "Invalid", emailCheck: "invalid", verificationProvider: "Hunter" }], apolloOnly))[0];
+      assert.equal(found.email, "new@firm.example");
+      assert.equal(found.emailStatus, "Unverified");
+      assert.equal(found.emailCheck, "not_checked");
+      assert.equal(found.verificationProvider, "");
+    });
+  });
+
   await t.test("disabled integrations and invalid company domains make no network requests", async () => {
     await isolated(async ({ api, requests }) => {
       api.saveIntegration("hunter", "fixture-hunter-secret");

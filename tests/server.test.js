@@ -28,6 +28,13 @@ test("configuration retains types, broad roles and bounded finite numeric values
   const config = normalizeConfig({ types: ["Family offices", "Private banks", "bogus"], roles: ["CIO", "Business Development"], firms: Infinity, contactsPerFirm: 99, minFit: -4 });
   assert.deepEqual(config.types, ["Family offices", "Private banks"]);
   assert.equal(config.firms, 15); assert.equal(config.contactsPerFirm, 8); assert.equal(config.minFit, 1);
+  assert.equal(normalizeConfig({ researchBrief: "  Focus on independent managers  " }).researchBrief, "Focus on independent managers");
+  assert.equal(normalizeConfig({ researchBrief: "x".repeat(3000) }).researchBrief.length, 2000);
+});
+test("preflight estimate is available before a run and responds to research controls", async () => {
+  const small = await (await fetch(`${base}/api/estimate?engine=codex-cli&firms=3&contactsPerFirm=1`)).json();
+  const deep = await (await fetch(`${base}/api/estimate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ engine: "codex-cli", firms: 30, contactsPerFirm: 5, researchDepth: "deep", drafts: true }) })).json();
+  assert.ok(small.highMinutes > small.lowMinutes); assert.ok(deep.highMinutes > small.highMinutes); assert.equal(small.concurrency, 2); assert.match(small.basis, /Approximate/);
 });
 test("metrics count people, unique emails and independent verification separately", () => {
   const run = runWithContacts(); assert.equal(run.metrics.contacts, 2); assert.equal(run.metrics.emails, 2); assert.equal(run.metrics.verified, 1); assert.equal(run.metrics.published, 0); assert.equal(run.metrics.meetingReady, 1);
